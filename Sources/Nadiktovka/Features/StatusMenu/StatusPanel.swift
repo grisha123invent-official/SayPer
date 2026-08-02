@@ -79,19 +79,14 @@ final class StatusPanelController {
         hosting.sizingOptions = [.intrinsicContentSize]
         hosting.translatesAutoresizingMaskIntoConstraints = false
 
-        // Настоящее стекло панели даёт NSVisualEffectView в режиме
-        // `.behindWindow`: он размывает рабочий стол и окна ПОД панелью.
-        // SwiftUI-стекло (`glassEffect`) работает только внутри своего окна —
-        // у прозрачной панели за ним пусто, и получался чёрный прямоугольник.
-        //
-        // Материал `.sidebar` — самый прозрачный из пригодных: сквозь него
-        // видно, что лежит под панелью. `.popover` и `.hudWindow` плотные,
-        // в тёмной теме они читаются как чёрный блок, а не как стекло.
+        // Панель повторяет окно приложения: тёмное шасси, поверх — фон-орб,
+        // и уже на нём стеклянные элементы. Прежний светлый `.sidebar`
+        // сам по себе давал ровную серую плашку: материалу нечего было
+        // показывать, кроме тёмного экрана под панелью.
         let glass = NSVisualEffectView()
-        glass.material = .sidebar
+        glass.material = .windowBackground
         glass.blendingMode = .behindWindow
         glass.state = .active
-        glass.isEmphasized = true
         glass.wantsLayer = true
         glass.layer?.cornerRadius = 16
         glass.layer?.cornerCurve = .continuous
@@ -117,11 +112,6 @@ final class StatusPanelController {
             defer: false
         )
         panel.contentView = glass
-        // Панель всегда в светлом виде: системные материалы показывают то,
-        // что под ними, и в тёмной теме стекло получается тёмным. Заказчику
-        // нужно беловатое матовое стекло, как на референсе Apple, поэтому
-        // тема панели фиксируется, а не следует за системной.
-        panel.appearance = NSAppearance(named: .aqua)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         // Тень и кромку рисует стекло содержимого.
@@ -267,13 +257,17 @@ private struct StatusPanelView: View {
         }
         .padding(14)
         .frame(width: 320)
-        // Стекло держит окно (NSVisualEffectView за этим видом), здесь остаётся
-        // только кромка: тонкая светлая обводка по скруглению панели.
+        // Тот же фон, что в окне настроек: без него стеклу элементов нечего
+        // преломлять и панель выглядит плоской серой плашкой. Приглушён:
+        // в узкой панели орб занимает всю ширину, и на полной яркости
+        // его кольцо режет список расшифровок пополам.
+        .background(AmbientGlow().opacity(0.55))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Palette.rimGlass, lineWidth: 1)
                 .allowsHitTesting(false)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: Шапка
@@ -284,8 +278,8 @@ private struct StatusPanelView: View {
                 // Внутри панели стекло уже есть — своё поверх него мутит
                 // картинку. Кружок держится заливкой и кромкой.
                 Circle()
-                    .fill(Palette.surfaceTile)
-                    .overlay(Circle().strokeBorder(Palette.rimGlass, lineWidth: 1))
+                    .fill(.white.opacity(0.10))
+                    .glassEffect(.clear, in: Circle())
                 Image(systemName: "mic.fill")
                     .font(.system(size: 14, weight: .medium))
             }
@@ -359,8 +353,9 @@ private struct StatusPanelView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Palette.surfaceTile)
+                .fill(.white.opacity(0.08))
         )
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: Последние расшифровки
@@ -498,8 +493,9 @@ private struct StatusPanelView: View {
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Palette.surfaceTile)
+                    .fill(.white.opacity(0.08))
             )
+            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }
