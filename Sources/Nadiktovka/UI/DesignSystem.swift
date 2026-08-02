@@ -300,28 +300,27 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: separated ? 0 : Palette.spaceCardRows) {
             HStack(spacing: Palette.spaceXs) {
-                Text(title).font(.headline)
+                // Заголовок секции — тихая надстрочная метка, а не второй
+                // по весу текст на экране: границу секции держит он сам
+                // плюс воздух, поэтому волосок под ним больше не нужен.
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(.tertiary)
                 Spacer(minLength: Palette.spaceXs)
                 accessory
             }
-            // Шапка карточки — 20pt, но контрол справа (сегменты периода)
-            // выше подписи, поэтому высота минимальная, а не жёсткая.
-            .frame(minHeight: 20)
+            .frame(minHeight: 16)
+            .padding(.bottom, Palette.space2xs)
 
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Palette.spaceLg)
         .padding(.vertical, Palette.spaceCardVertical)
-        // Своего стекла у секции больше нет: раздел собран одной матовой
-        // панелью в SectionScaffold, а секции внутри разделяет волосок
-        // во всю ширину. Вложенное стекло поверх стекла давало муть.
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Palette.hairline)
-                .frame(height: 1)
-                .opacity(0.6)
-        }
+        // Границы секций держит воздух, а не линии: заголовок-метка сверху
+        // уже отделяет группу, и волосок поверх него был третьим сигналом
+        // об одной и той же границе.
     }
 }
 
@@ -399,17 +398,25 @@ struct GlassSwitchStyle: ToggleStyle {
         HStack {
             configuration.label
             Capsule()
-                .fill(.clear)
+                // Включённое состояние — акцент, приглушённый до состояния
+                // подсветки под стеклом. Сплошная синяя заливка перебивала
+                // стекло, и переключатель читался как обычный системный.
+                .fill(configuration.isOn
+                      ? AnyShapeStyle(Color.accentColor.opacity(0.34))
+                      : AnyShapeStyle(Color.white.opacity(0.08)))
                 .frame(width: trackWidth, height: trackHeight)
-                // Оттенок стекла берём из системного акцента, который выбран
-                // в настройках macOS, — как это делают родные контролы.
-                .glassEffect(
-                    configuration.isOn ? .regular.tint(.accentColor) : .regular,
-                    in: Capsule()
+                .glassEffect(.clear.interactive(), in: Capsule())
+                // Кромка дорожки: без неё выключенный переключатель
+                // растворяется в панели.
+                .overlay(
+                    Capsule().strokeBorder(Palette.rimGlass, lineWidth: 1)
                 )
                 .overlay(
                     Circle()
-                        .fill(.white)
+                        // Бегунок тоже стеклянный, а не глухой белый кружок:
+                        // сквозь него видно подсветку дорожки.
+                        .fill(.white.opacity(configuration.isOn ? 0.95 : 0.72))
+                        .glassEffect(.clear, in: Circle())
                         .shadow(color: .black.opacity(0.22), radius: 1.5, y: 1)
                         .frame(width: knobSize, height: knobSize)
                         .padding(3),

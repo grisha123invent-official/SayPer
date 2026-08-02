@@ -6,22 +6,18 @@ struct SettingsSectionGeneral: View {
 
     var body: some View {
         SectionScaffold {
-            hotkey
-            RecordingModeCard()
+            activation
             duringRecording
         }
     }
 
-    private var hotkey: some View {
-        GlassCard("Горячая клавиша", separated: true) {
-            CardDivider()
-
-            // Подсказка про поле стала описанием под самим полем: отдельным
-            // блоком под разделителем она читалась как отдельная мысль,
-            // хотя объясняет ровно этот контрол (`ia.md` §3).
+    /// Сочетание и режим — одна тема: чем запускается запись. Раньше они жили
+    /// в двух секциях, и граница между ними ничего не значила.
+    private var activation: some View {
+        GlassCard("Активация") {
             SettingRow(
-                "Зажимать",
-                subtitle: "Кликни и зажми сочетание. Левые и правые клавиши различаются"
+                "Сочетание",
+                subtitle: "Кликни по полю и зажми клавиши. Левые и правые различаются"
             ) {
                 // Сброс живёт внутри поля, у правого края с отступом 6
                 // (`components.md` §2), и рисует его сам рекордер. Отдельной
@@ -30,14 +26,14 @@ struct SettingsSectionGeneral: View {
                 HotkeyRecorder(hotkey: $model.hotkey)
                     .frame(width: 190, height: 28)
             }
+
+            RecordingModeRow()
         }
     }
 
     private var duringRecording: some View {
-        GlassCard("Во время записи", separated: true) {
-            CardDivider()
+        GlassCard("Во время записи") {
             SwitchToggle("Показывать индикатор", isOn: $model.showIndicator)
-            CardDivider()
             SwitchToggle("Звуковые сигналы", isOn: $model.playSounds)
         }
     }

@@ -1,7 +1,7 @@
 import Combine
 import SwiftUI
 
-/// Карточка «Режим» в разделе «Запись».
+/// Строка «Режим» в секции «Активация» раздела «Запись».
 ///
 /// Сегменты, а не переключатель: удержание и «нажал-нажал» — два равноправных
 /// способа, а не включение опции (`ia.md` §1.1). Описание под сегментами меняется
@@ -16,16 +16,12 @@ import SwiftUI
 /// карточка в эталоне не меняет высоту при переключении сегментов. Предел живёт
 /// в `Settings+Recording` со значением по умолчанию в пять минут — это страховка
 /// от забытой записи (`plan.md` §5), а не настройка, которую ходят крутить.
-struct RecordingModeCard: View {
+struct RecordingModeRow: View {
     @State private var mode: HotkeyActivation = Settings.shared.hotkeyActivation
 
     var body: some View {
-        GlassCard("Режим", separated: true) {
-            CardDivider()
-
-            SettingRow("Активация", subtitle: mode.summary) {
-                SegmentedControl(selection: $mode) { $0.title }
-            }
+        SettingRow("Режим", subtitle: mode.summary) {
+            SegmentedControl(selection: $mode) { $0.title }
         }
         .onChange(of: mode) { _, newValue in
             Settings.shared.hotkeyActivation = newValue
