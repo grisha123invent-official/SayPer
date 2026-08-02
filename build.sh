@@ -11,7 +11,7 @@ APP_NAME="Надиктовка"
 APP_DIR="dist/${APP_NAME}.app"
 BIN="build/${EXECUTABLE}"
 
-TARGET="$(uname -m)-apple-macos13.0"
+TARGET="$(uname -m)-apple-macos26.0"
 
 echo "==> Компиляция"
 mkdir -p build

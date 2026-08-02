@@ -132,7 +132,7 @@ final class HistoryStore: ObservableObject, TranscriptionObserver {
         guard
             let target = previousApp,
             !target.isTerminated,
-            target.activate(options: [.activateIgnoringOtherApps])
+            target.activate()
         else {
             fallBackToClipboard(record)
             return

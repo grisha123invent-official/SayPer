@@ -111,25 +111,10 @@ struct SettingsTabStrip: View {
         }
         .padding(2)
         .frame(height: Palette.tabCapsuleHeight)
-        // Блик — под кнопками, как `.tabs::before` под `.tab { z-index: 1 }`
-        // в мокапе: он светит по кромке дорожки, а не поверх иконок и подписей.
-        // Нижняя кромка (`tokens.md` §2) — тенью, как второй `box-shadow`
-        // капсулы: без неё капсула не садится на материал титлбара.
-        .background(
-            ZStack {
-                Capsule(style: .continuous)
-                    .fill(Palette.surfaceTabTrack)
-                    .shadow(color: Palette.rimGlassBottom, radius: 0.5, y: 0.5)
-                Capsule(style: .continuous)
-                    .fill(Palette.specular)
-            }
-            .allowsHitTesting(false)
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .strokeBorder(Palette.rimGlass, lineWidth: 1)
-                .allowsHitTesting(false)
-        )
+        // Дорожка — настоящее стекло macOS 26: оно само преломляет материал
+        // титлбара и рисует кромку, поэтому рукотворные блик, обводка и тень
+        // здесь больше не нужны.
+        .glassEffect(.regular, in: Capsule(style: .continuous))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Разделы настроек")

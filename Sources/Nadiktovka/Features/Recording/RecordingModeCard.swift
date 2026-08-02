@@ -27,7 +27,7 @@ struct RecordingModeCard: View {
                 SegmentedControl(selection: $mode) { $0.title }
             }
         }
-        .onChange(of: mode) { newValue in
+        .onChange(of: mode) { _, newValue in
             Settings.shared.hotkeyActivation = newValue
         }
         // Режим меняют и из меню в строке статуса — при открытом окне сегменты

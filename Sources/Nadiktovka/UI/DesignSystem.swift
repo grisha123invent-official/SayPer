@@ -360,7 +360,42 @@ struct SwitchToggle: View {
         SettingRow(title, subtitle: subtitle) {
             Toggle("", isOn: $isOn)
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .toggleStyle(GlassSwitchStyle())
+        }
+    }
+}
+
+/// Переключатель на настоящем стекле macOS 26: дорожка преломляет то, что под
+/// ней, включённое состояние подкрашивается акцентом. Системный `.switch`
+/// рисует плоскую заливку и рядом со стеклянным окном смотрится чужеродно.
+struct GlassSwitchStyle: ToggleStyle {
+    private let trackWidth: CGFloat = 42
+    private let trackHeight: CGFloat = 24
+    private var knobSize: CGFloat { trackHeight - 6 }
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack {
+            configuration.label
+            Capsule()
+                .fill(.clear)
+                .frame(width: trackWidth, height: trackHeight)
+                // Оттенок стекла берём из системного акцента, который выбран
+                // в настройках macOS, — как это делают родные контролы.
+                .glassEffect(
+                    configuration.isOn ? .regular.tint(.accentColor) : .regular,
+                    in: Capsule()
+                )
+                .overlay(
+                    Circle()
+                        .fill(.white)
+                        .shadow(color: .black.opacity(0.22), radius: 1.5, y: 1)
+                        .frame(width: knobSize, height: knobSize)
+                        .padding(3),
+                    alignment: configuration.isOn ? .trailing : .leading
+                )
+                .animation(.snappy(duration: 0.18), value: configuration.isOn)
+                .onTapGesture { configuration.isOn.toggle() }
+                .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
         }
     }
 }
@@ -409,9 +444,11 @@ struct StatTile: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Palette.spaceSm)
-        .background(
-            RoundedRectangle(cornerRadius: Palette.radiusTile, style: .continuous)
-                .fill(Palette.surfaceTile)
+        // Плитки — единственное место, где стекло уместно поверх карточки:
+        // они крупные, стоят рядом и читаются как один блок.
+        .glassEffect(
+            .regular,
+            in: RoundedRectangle(cornerRadius: Palette.radiusTile, style: .continuous)
         )
     }
 }
