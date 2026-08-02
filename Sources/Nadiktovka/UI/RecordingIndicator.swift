@@ -8,10 +8,13 @@ import SwiftUI
 /// перехватывает мышь и не забирает фокус у того приложения, куда человек
 /// сейчас диктует.
 ///
-/// Стекло — `NSVisualEffectView` с `.behindWindow`, а не `glassEffect` из
-/// SwiftUI. Пилюля висит в прозрачном окне: внутри окна под ней нет ничего,
-/// и SwiftUI-стекло преломляло пустоту, выдавая серую плашку. Преломлять
-/// нужно то, что за окном, — чужое приложение, в которое человек диктует.
+/// Стекло — `NSGlassEffectView` из macOS 26 в прозрачном стиле: настоящее
+/// преломление того, что за окном, то есть чужого приложения, куда диктуют.
+/// Ни `glassEffect` из SwiftUI, ни `NSVisualEffectView` тут не подошли:
+/// первый преломлял пустоту внутри прозрачного окна и выдавал серую плашку,
+/// второй давал матовую, но глухую подложку. Оформление у стекла принудительно
+/// тёмное: пилюля висит над чужими окнами, и её читаемость не должна зависеть
+/// от того, какую тему человек выбрал приложению.
 final class RecordingIndicator {
     enum State: Equatable {
         case recording
@@ -21,7 +24,7 @@ final class RecordingIndicator {
 
     private let model = IndicatorModel()
     private var panel: NSPanel?
-    private var glass: NSVisualEffectView?
+    private var glass: NSGlassEffectView?
     private var hideTimer: Timer?
 
     // MARK: - Публичный интерфейс
@@ -34,13 +37,16 @@ final class RecordingIndicator {
 
         let panel = self.panel ?? makePanel()
         model.state = state
+        model.startRim()
+        // Прозрачное стекло само по себе бесцветно — состояние в нём читается
+        // только через тон.
+        glass?.tintColor = NSColor(model.tint).withAlphaComponent(0.20)
         resize(panel, animated: panel.isVisible)
         position(panel)
 
         if !panel.isVisible {
             panel.alphaValue = 0
             panel.orderFrontRegardless()
-            model.appear()
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.22
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -85,8 +91,9 @@ final class RecordingIndicator {
             context.duration = 0.18
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
-        }, completionHandler: { [weak panel] in
+        }, completionHandler: { [weak self, weak panel] in
             panel?.orderOut(nil)
+            self?.model.stopRim()
         })
     }
 
@@ -110,21 +117,24 @@ final class RecordingIndicator {
         halo.autoresizingMask = [.width, .height]
         container.addSubview(halo)
 
-        let glass = NSVisualEffectView(frame: frame.insetBy(dx: bleed, dy: bleed))
-        glass.material = .hudWindow
-        glass.blendingMode = .behindWindow
-        glass.state = .active
-        glass.wantsLayer = true
-        glass.layer?.cornerRadius = IndicatorMetrics.height / 2
-        glass.layer?.masksToBounds = true
+        let glass = NSGlassEffectView(frame: frame.insetBy(dx: bleed, dy: bleed))
+        glass.style = .clear
+        glass.cornerRadius = IndicatorMetrics.height / 2
+        glass.appearance = NSAppearance(named: .darkAqua)
         glass.autoresizingMask = [.width, .height]
+        // Полоски и подпись живут внутри стекла: класс гарантирует правильный
+        // порядок слоёв только для `contentView`, произвольные подвиды могут
+        // оказаться где угодно.
+        glass.contentView = NSHostingView(rootView: IndicatorContent(model: model))
         container.addSubview(glass)
         self.glass = glass
 
-        let content = NSHostingView(rootView: IndicatorView(model: model))
-        content.frame = frame
-        content.autoresizingMask = [.width, .height]
-        container.addSubview(content)
+        // Кромка — снаружи стекла, отдельным слоем: внутри её бы преломило
+        // вместе с содержимым, и искры размазало бы по краю.
+        let rim = NSHostingView(rootView: IndicatorRim(model: model))
+        rim.frame = frame
+        rim.autoresizingMask = [.width, .height]
+        container.addSubview(rim)
 
         let panel = NSPanel(
             contentRect: frame,
@@ -194,20 +204,48 @@ private final class IndicatorModel: ObservableObject {
     /// а не в отрисовке: иначе полоски дёргаются.
     @Published private(set) var level: Float = 0
 
+    /// Уровень для картинки — сглажен куда сильнее, чем для полосок.
+    /// Полоскам нужна быстрая реакция, свечению и скорости искр — нет:
+    /// на голосовом сигнале они начинали полыхать и дёргаться.
+    @Published private(set) var calmLevel: Float = 0
+
     private var smoothed: Float = 0
+    private var calm: Float = 0
 
     var levelInput: Float {
         get { smoothed }
         set {
             smoothed = smoothed * 0.55 + newValue * 0.45
             level = smoothed
+            calm = calm * 0.90 + newValue * 0.10
+            calmLevel = calm
         }
     }
 
-    /// Однократный импульс появления — по нему SwiftUI играет масштабирование.
-    @Published var appearanceToken = 0
+    /// Пройденная искрой доля контура, 0…1.
+    ///
+    /// Копится по шагам, а не считается из абсолютного времени. Формула
+    /// `время × скорость` при меняющейся скорости давала скачки на пол-контура
+    /// каждый кадр: время с 2001 года — сотни миллионов секунд, и любое
+    /// изменение множителя швыряло искру куда попало. Это и было мерцание.
+    @Published private(set) var rimPhase: Double = 0
 
-    func appear() { appearanceToken &+= 1 }
+    private var ticker: Timer?
+
+    func startRim() {
+        guard ticker == nil else { return }
+        ticker = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard !self.isStatic else { return }
+            self.rimPhase = (self.rimPhase + self.runnerSpeed / 360 / 30)
+                .truncatingRemainder(dividingBy: 1)
+        }
+    }
+
+    func stopRim() {
+        ticker?.invalidate()
+        ticker = nil
+    }
 
     var title: String {
         switch state {
@@ -237,8 +275,8 @@ private final class IndicatorModel: ObservableObject {
     /// Градусов в секунду для бегущей по контуру искры.
     var runnerSpeed: Double {
         switch state {
-        case .recording: return 55 + Double(min(level, 1)) * 120
-        case .transcribing: return 130
+        case .recording: return 62 + Double(min(calmLevel, 1)) * 48
+        case .transcribing: return 115
         case .error: return 0
         }
     }
@@ -285,11 +323,22 @@ private struct IndicatorHalo: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20, paused: model.isStatic)) { timeline in
             let t = model.isStatic ? 0 : timeline.date.timeIntervalSinceReferenceDate
-            Capsule()
-                .fill(model.tint)
-                .padding(IndicatorMetrics.bleed)
-                .blur(radius: 13)
-                .opacity(opacity(at: t))
+            ZStack {
+                Capsule()
+                    .fill(model.tint)
+                    .padding(IndicatorMetrics.bleed)
+                    .blur(radius: 13)
+                    .opacity(opacity(at: t))
+
+                // Тёмная подложка ровно под капсулой. Прозрачное стекло само
+                // подстраивается под фон и над белым документом остаётся белым —
+                // светлая подпись на нём пропадает. Подложка лежит под стеклом,
+                // поэтому стекло её преломляет вместе с фоном: пилюля остаётся
+                // стеклянной, но подпись читается на любом окне.
+                Capsule()
+                    .fill(Color.black.opacity(0.34))
+                    .padding(IndicatorMetrics.bleed)
+            }
         }
         .allowsHitTesting(false)
     }
@@ -299,67 +348,58 @@ private struct IndicatorHalo: View {
     private func opacity(at time: TimeInterval) -> Double {
         switch model.state {
         case .recording:
-            return 0.45 + Double(min(model.level, 1)) * 0.45
+            return 0.42 + Double(min(model.calmLevel, 1)) * 0.26
         case .transcribing:
-            return 0.55 + 0.22 * sin(time * 2 * .pi / 2.4)
+            return 0.50 + 0.14 * sin(time * 2 * .pi / 2.4)
         case .error:
-            return 0.60
+            return 0.58
         }
     }
 }
 
 // MARK: - Содержимое
 
-private struct IndicatorView: View {
+/// Содержимое пилюли — то, что лежит внутри стекла.
+private struct IndicatorContent: View {
     @ObservedObject var model: IndicatorModel
-    @State private var appeared = false
 
     var body: some View {
-        ZStack {
-            rim
-            HStack(spacing: IndicatorMetrics.gap) {
-                Equalizer(level: model.level, state: model.state, tint: model.tint)
-                    .frame(width: IndicatorMetrics.barsWidth, height: 12)
+        HStack(spacing: IndicatorMetrics.gap) {
+            Equalizer(level: model.level, state: model.state, tint: model.tint)
+                .frame(width: IndicatorMetrics.barsWidth, height: 12)
 
-                Text(model.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+            Text(model.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, IndicatorMetrics.padding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Кромка капсулы: ровный светлый волосок плюс две искры, бегущие по нему
+/// навстречу друг другу. Скорость искр зависит от состояния — во время
+/// записи она растёт с громкостью, и контур отзывается на голос.
+private struct IndicatorRim: View {
+    @ObservedObject var model: IndicatorModel
+
+    var body: some View {
+        // Доля пути, а не угол: `trim` идёт по длине контура, поэтому искра
+        // проходит прямые участки и закругления с одной скоростью. Угловой
+        // градиент так не умеет — на вытянутой капсуле он летел по бокам
+        // и полз на торцах.
+        ZStack {
+            Capsule()
+                .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+
+            if !model.isStatic {
+                runner(at: model.rimPhase)
+                runner(at: model.rimPhase + 0.5)
             }
-            .padding(.horizontal, IndicatorMetrics.padding)
         }
         .padding(IndicatorMetrics.bleed)
-        .scaleEffect(appeared ? 1 : 0.92)
-        .animation(.spring(response: 0.28, dampingFraction: 0.7), value: appeared)
-        .onAppear { appeared = true }
-        .onChange(of: model.appearanceToken) { _, _ in
-            appeared = false
-            DispatchQueue.main.async { appeared = true }
-        }
-    }
-
-    /// Кромка капсулы: ровный светлый волосок плюс две искры, бегущие по нему
-    /// навстречу друг другу. Скорость искр зависит от состояния — во время
-    /// записи она растёт с громкостью, и контур отзывается на голос.
-    private var rim: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: model.isStatic)) { timeline in
-            let t = model.isStatic ? 0 : timeline.date.timeIntervalSinceReferenceDate
-            // Доля пути, а не угол: `trim` идёт по длине контура, поэтому искра
-            // проходит прямые участки и закругления с одной скоростью.
-            // Угловой градиент так не умеет — на вытянутой капсуле он летел
-            // по бокам и полз на торцах.
-            let progress = (t * model.runnerSpeed / 360).truncatingRemainder(dividingBy: 1)
-
-            ZStack {
-                Capsule()
-                    .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
-
-                if !model.isStatic {
-                    runner(at: progress)
-                    runner(at: progress + 0.5)
-                }
-            }
-        }
+        .allowsHitTesting(false)
     }
 
     /// Искра с хвостом: три дуги от длинной тусклой к короткой яркой.
