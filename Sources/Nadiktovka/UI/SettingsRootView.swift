@@ -53,8 +53,6 @@ struct SettingsRootView: View {
         switch model.section {
         case .general:
             SettingsSectionGeneral(model: model)
-        case .dictation:
-            SettingsSectionDictation(model: model)
         case .history:
             SettingsSectionHistory()
         case .usage:

@@ -4,10 +4,9 @@ import Foundation
 /// (`design/ia.md`): то, что настраивают в первую неделю, идёт первым,
 /// «поставил и забыл» — в конец. Состав заморожен: новые разделы не заводятся.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    /// Запись: горячая клавиша, режим, индикатор, звуки.
+    /// Диктовка: сочетание, режим, индикатор, звуки, модель, язык,
+    /// словарь, чистка, способ вставки — весь путь от клавиши до текста.
     case general
-    /// Текст: модель, язык, чистка, словарь, способ вставки.
-    case dictation
     /// История последних расшифровок.
     case history
     /// Расходы: минуты, слова, оценка стоимости.
@@ -19,8 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .general: return "Запись"
-        case .dictation: return "Текст"
+        case .general: return "Диктовка"
         case .history: return "История"
         case .usage: return "Расходы"
         case .system: return "Ключ и доступ"
@@ -30,21 +28,19 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "mic"
-        case .dictation: return "text.alignleft"
         case .history: return "clock.arrow.circlepath"
         case .usage: return "chart.bar"
         case .system: return "key"
         }
     }
 
-    /// Клавиша для ⌘1…⌘5.
+    /// Клавиша для ⌘1…⌘4.
     var shortcut: Character {
         switch self {
         case .general: return "1"
-        case .dictation: return "2"
-        case .history: return "3"
-        case .usage: return "4"
-        case .system: return "5"
+        case .history: return "2"
+        case .usage: return "3"
+        case .system: return "4"
         }
     }
 }

@@ -1,18 +1,37 @@
 import SwiftUI
 
-/// Раздел «Запись»: чем включать диктовку и что видно, пока она идёт.
+/// Раздел «Диктовка»: весь путь от нажатия клавиши до текста в поле.
+///
+/// Прежде это были два раздела — «Запись» и «Текст». Настраивают они одно
+/// и то же действие, просто разные его стадии, и переключаться между ними
+/// приходилось посреди одной задачи. Секции внутри идут по ходу дела:
+/// чем запускаю → что вижу, пока говорю → как распознаётся → куда попадает.
 struct SettingsSectionGeneral: View {
     @ObservedObject var model: SettingsModel
+
+    @FocusState private var vocabularyFocused: Bool
+
+    private let languages: [(String, String)] = [
+        ("", "Автоопределение"),
+        ("ru", "Русский"),
+        ("en", "English"),
+        ("de", "Deutsch"),
+        ("es", "Español"),
+        ("fr", "Français")
+    ]
 
     var body: some View {
         SectionScaffold {
             activation
             duringRecording
+            transcription
+            insertion
         }
     }
 
-    /// Сочетание и режим — одна тема: чем запускается запись. Раньше они жили
-    /// в двух секциях, и граница между ними ничего не значила.
+    // MARK: - Чем запускается
+
+    /// Сочетание и режим — одна тема: чем запускается запись.
     private var activation: some View {
         GlassCard("Активация") {
             SettingRow(
@@ -31,10 +50,97 @@ struct SettingsSectionGeneral: View {
         }
     }
 
+    // MARK: - Пока говоришь
+
     private var duringRecording: some View {
         GlassCard("Во время записи") {
             SwitchToggle("Показывать индикатор", isOn: $model.showIndicator)
             SwitchToggle("Звуковые сигналы", isOn: $model.playSounds)
+        }
+    }
+
+    // MARK: - Как распознаётся
+
+    private var transcription: some View {
+        GlassCard("Расшифровка") {
+            SettingRow("Модель") {
+                Picker("", selection: $model.model) {
+                    ForEach(TranscriptionModel.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 260)
+            }
+
+            SettingRow("Язык речи") {
+                Picker("", selection: $model.language) {
+                    ForEach(languages, id: \.0) { code, title in
+                        Text(title).tag(code)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 180)
+            }
+
+            vocabulary
+
+            SwitchToggle(
+                "Причёсывать текст",
+                subtitle: "Пунктуация и слова-паразиты, +1 секунда · gpt-4o-mini",
+                isOn: $model.cleanup
+            )
+        }
+    }
+
+    /// Подпись-заголовок над редактором убрана: что писать, объясняет плейсхолдер
+    /// внутри поля — там это видно ровно в тот момент, когда нужно (`ia.md` §3).
+    private var vocabulary: some View {
+        HStack(alignment: .top, spacing: Palette.spaceSm) {
+            Text("Словарь")
+                .font(.body)
+                .frame(height: Palette.rowHeight, alignment: .center)
+
+            Spacer(minLength: Palette.spaceSm)
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $model.vocabulary)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 5)
+                    .focused($vocabularyFocused)
+
+                if model.vocabulary.isEmpty {
+                    Text("имена и термины через запятую")
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(width: 330, height: 62)
+            // Заливка, обводка и фокусное кольцо — одним кирпичиком:
+            // `.plain`-редактор системного кольца не рисует (`tokens.md` §11).
+            .fieldChrome(isFocused: vocabularyFocused)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Куда попадает
+
+    private var insertion: some View {
+        GlassCard("Вставка") {
+            SettingRow("Способ") {
+                Picker("", selection: $model.insertMode) {
+                    ForEach(InsertMode.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 300)
+            }
         }
     }
 }
