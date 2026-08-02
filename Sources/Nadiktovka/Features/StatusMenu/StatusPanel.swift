@@ -11,7 +11,7 @@ import SwiftUI
 final class StatusPanelController {
     private weak var actions: StatusPanelActions?
     private var panel: NSPanel?
-    private var outsideClickMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
     private var localKeyMonitor: Any?
 
     private let model = StatusPanelModel()
@@ -37,7 +37,12 @@ final class StatusPanelController {
         layout(panel, under: button)
 
         panel.alphaValue = 0
-        panel.orderFrontRegardless()
+        // Панель делается ключевой: тогда клик мимо забирает у неё фокус,
+        // и она закрывается сама. Прежний вариант — глобальный монитор мыши —
+        // требовал прав универсального доступа, и система спрашивала их
+        // при каждом открытии.
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.14
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -73,9 +78,9 @@ final class StatusPanelController {
         let hosting = NSHostingView(rootView: root)
         hosting.sizingOptions = [.intrinsicContentSize]
 
-        let panel = NSPanel(
+        let panel = KeyablePanel(
             contentRect: NSRect(origin: .zero, size: NSSize(width: Self.size.width, height: 320)),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -120,8 +125,13 @@ final class StatusPanelController {
     private func startMonitors() {
         stopMonitors()
 
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
+        // Клик мимо панели уводит у неё фокус — этого достаточно, чтобы
+        // закрыться. Никаких глобальных мониторов ввода: они требуют
+        // разрешения и приводят к системному запросу при каждом открытии.
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
         ) { [weak self] _ in
             self?.close()
         }
@@ -136,11 +146,17 @@ final class StatusPanelController {
     }
 
     private func stopMonitors() {
-        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
-        outsideClickMonitor = nil
+        resignObserver = nil
         localKeyMonitor = nil
     }
+}
+
+/// Окно без рамки по умолчанию не может стать ключевым, а панели это нужно:
+/// на потере фокуса она закрывается.
+private final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
 
 /// То, что панель умеет попросить у приложения. Расширяет протокол меню:
