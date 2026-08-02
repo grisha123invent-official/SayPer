@@ -258,10 +258,9 @@ private struct StatusPanelView: View {
         .padding(14)
         .frame(width: 320)
         // Тот же фон, что в окне настроек: без него стеклу элементов нечего
-        // преломлять и панель выглядит плоской серой плашкой. Приглушён:
-        // в узкой панели орб занимает всю ширину, и на полной яркости
-        // его кольцо режет список расшифровок пополам.
-        .background(AmbientGlow().opacity(0.55))
+        // преломлять и панель выглядит плоской серой плашкой. Слегка
+        // приглушён — панель узкая, орб в ней крупнее относительно текста.
+        .background(AmbientGlow().opacity(0.75))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Palette.rimGlass, lineWidth: 1)
@@ -367,15 +366,25 @@ private struct StatusPanelView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 2)
 
-            ForEach(model.history) { record in
-                RecentRow(record: record) {
-                    model.actions?.menuInsertAgain(record.text)
-                    dismiss()
-                } copy: {
-                    model.actions?.menuCopy(record.text)
-                    dismiss()
+            VStack(spacing: 0) {
+                ForEach(model.history) { record in
+                    RecentRow(record: record) {
+                        model.actions?.menuInsertAgain(record.text)
+                        dismiss()
+                    } copy: {
+                        model.actions?.menuCopy(record.text)
+                        dismiss()
+                    }
                 }
             }
+            .padding(4)
+            // Данные лежат на своей матовой плашке: прямо на орбе строки
+            // расшифровок теряли контраст, кольцо проходило сквозь текст.
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.black.opacity(0.22))
+            )
+            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
@@ -458,6 +467,13 @@ private struct StatusPanelView: View {
                 .toggleStyle(GlassSwitchStyle())
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.black.opacity(0.22))
+        )
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: Низ
