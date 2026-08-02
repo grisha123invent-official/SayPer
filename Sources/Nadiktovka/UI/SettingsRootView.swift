@@ -185,17 +185,26 @@ struct SettingsTabStrip: View {
         }
     }
 
-    /// Активная вкладка: чистое стекло, без заливки и без подкраски.
-    /// `glassEffectID` внутри контейнера — родной механизм слияния стекла:
-    /// по дороге капсула сплавляется с дорожкой, а не летит поверх неё.
+    /// Активная вкладка: родное Liquid Glass в прозрачном варианте.
+    ///
+    /// `.clear` вместо `.regular` — стекло не тонируется под тему и остаётся
+    /// прозрачным, с бликом и преломлением по краю. Светлый `colorScheme`
+    /// заставляет систему рисовать его как светлое стекло: в тёмной теме
+    /// `.regular` уходил в тёмное и плашка сливалась с фоном полосы.
+    ///
+    /// `NSVisualEffectView` тут не годится: он даёт ровную матовую заливку
+    /// без бликов — на тёмном фоне это читается как серый прямоугольник.
     private struct ActiveCapsule: View {
         let namespace: Namespace.ID
 
         var body: some View {
             Capsule(style: .continuous)
-                .fill(.clear)
-                // interactive() — стекло отзывается бликом на курсор.
-                .glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
+                // Светлая подложка под стеклом: на тёмном фоне полосы одно
+                // лишь прозрачное стекло остаётся тёмным, а плашка должна
+                // читаться как светлая — так же, как в референсе Apple.
+                .fill(.white.opacity(0.26))
+                .glassEffect(.clear.interactive(), in: Capsule(style: .continuous))
+                .environment(\.colorScheme, .light)
                 .glassEffectID("activeTab", in: namespace)
         }
     }
