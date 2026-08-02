@@ -260,7 +260,14 @@ private struct StatusPanelView: View {
         // Тот же фон, что в окне настроек: без него стеклу элементов нечего
         // преломлять и панель выглядит плоской серой плашкой. Слегка
         // приглушён — панель узкая, орб в ней крупнее относительно текста.
-        .background(AmbientGlow().opacity(0.75))
+        .background(
+            // Орб растянут: в панели он центрируется по её высоте, и низ
+            // с кнопками оставался в темноте — стеклу там было нечего
+            // преломлять, кнопки выходили серыми плитами.
+            AmbientGlow()
+                .scaleEffect(1.7)
+                .opacity(0.75)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Palette.rimGlass, lineWidth: 1)
@@ -512,12 +519,15 @@ private struct StatusPanelView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
             // Кнопки — на стекле: они отзываются на курсор и должны читаться
-            // как поверхность, которую нажимают.
+            // как поверхность, которую нажимают. Рецепт тот же, что у активной
+            // вкладки: лёгкая подложка, прозрачное стекло и светлый вид —
+            // плотная заливка глушила стекло и давала серую плиту.
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.white.opacity(0.18))
+                    .fill(.white.opacity(0.26))
             )
             .glassEffect(.clear.interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .environment(\.colorScheme, .light)
         }
         .buttonStyle(.plain)
     }
