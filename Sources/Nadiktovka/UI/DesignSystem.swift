@@ -556,7 +556,10 @@ struct SegmentedControl<Value: Hashable>: View {
         }
         .padding(2)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            // Капсула, а не прямоугольник со слабым скруглением: рядом
+            // переключатели и поле хоткея скруглены сильно, и угловатая
+            // дорожка сегментов выпадала из общего языка форм.
+            Capsule(style: .continuous)
                 .fill(Palette.segmentTrack)
         )
     }
@@ -578,7 +581,8 @@ struct SegmentedControl<Value: Hashable>: View {
                     .padding(.horizontal, compact ? 9 : Palette.spaceSm)
                     .padding(.vertical, compact ? 3 : Palette.space2xs)
                     .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        // Бегунок повторяет форму дорожки: капсула в капсуле.
+                        Capsule(style: .continuous)
                             .fill(fill)
                             // Край бегунка: в мокапе `--seg-active-shadow`,
                             // тень только у выбранного сегмента.
@@ -588,7 +592,7 @@ struct SegmentedControl<Value: Hashable>: View {
                                 y: 0.5
                             )
                     )
-                    .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .contentShape(Capsule(style: .continuous))
             }
             .buttonStyle(.plain)
             .onHover { isHovered = $0 }

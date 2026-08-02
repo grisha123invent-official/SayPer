@@ -79,7 +79,10 @@ final class HotkeyRecorderView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        focusRingType = .default
+        // Своё кольцо фокуса не рисуем: окно делает поле первым откликающимся
+        // сразу при открытии, и синяя рамка висела постоянно, будто идёт
+        // запись сочетания. Режим записи и так виден по подсветке поля.
+        focusRingType = .none
         addSubview(resetButton)
         refreshStyle()
     }
