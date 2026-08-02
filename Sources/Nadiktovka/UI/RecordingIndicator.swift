@@ -295,7 +295,14 @@ private enum IndicatorMetrics {
     static let barSpacing: CGFloat = 3
     /// Поле вокруг пилюли под свечение: окно больше самой капсулы на столько
     /// с каждой стороны.
-    static let bleed: CGFloat = 14
+    ///
+    /// Должно с запасом перекрывать разлёт размытия (`glowBlur`), иначе ореол
+    /// упирается в край окна и обрезается — вокруг пилюли становится виден
+    /// светлый прямоугольник с чёткой границей.
+    static let bleed: CGFloat = 34
+    /// Радиус размытия ореола. Хвост гауссова размытия тянется примерно
+    /// на три радиуса, и эти три радиуса обязаны уместиться в `bleed`.
+    static let glowBlur: CGFloat = 9
     static let font = NSFont.systemFont(ofSize: 11, weight: .medium)
 
     static var barsWidth: CGFloat {
@@ -327,7 +334,7 @@ private struct IndicatorHalo: View {
                 Capsule()
                     .fill(model.tint)
                     .padding(IndicatorMetrics.bleed)
-                    .blur(radius: 13)
+                    .blur(radius: IndicatorMetrics.glowBlur)
                     .opacity(opacity(at: t))
 
                 // Тёмная подложка ровно под капсулой. Прозрачное стекло само
@@ -348,11 +355,11 @@ private struct IndicatorHalo: View {
     private func opacity(at time: TimeInterval) -> Double {
         switch model.state {
         case .recording:
-            return 0.42 + Double(min(model.calmLevel, 1)) * 0.26
+            return 0.20 + Double(min(model.calmLevel, 1)) * 0.16
         case .transcribing:
-            return 0.50 + 0.14 * sin(time * 2 * .pi / 2.4)
+            return 0.26 + 0.07 * sin(time * 2 * .pi / 2.4)
         case .error:
-            return 0.58
+            return 0.30
         }
     }
 }
