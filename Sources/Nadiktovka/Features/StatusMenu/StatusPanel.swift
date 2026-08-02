@@ -504,6 +504,10 @@ private struct StatusPanelView: View {
                 Text(title)
                     .font(.system(size: 10))
             }
+            // Цвет задаётся явно: светлый режим стекла ниже перекрашивает
+            // содержимое под светлый фон, и на тёмной панели иконки уходили
+            // в темноту, оставаясь почти невидимыми.
+            .foregroundStyle(.white.opacity(0.92))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
             // Кнопки — на стекле: они отзываются на курсор и должны читаться
