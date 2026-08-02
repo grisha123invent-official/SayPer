@@ -136,9 +136,29 @@ struct SettingsTabStrip: View {
                 if let frame = frames[model.section] {
                     ActiveCapsule(namespace: glassSpace)
                         .frame(width: frame.width, height: frame.height)
+                        // Капля: по дороге плашка вытягивается вдоль движения
+                        // и сплющивается поперёк, в конце упруго возвращается
+                        // в форму. Само перемещение — отдельной анимацией.
+                        .keyframeAnimator(
+                            initialValue: Morph(),
+                            trigger: model.section
+                        ) { view, morph in
+                            view.scaleEffect(x: morph.stretch, y: morph.squash, anchor: .center)
+                        } keyframes: { _ in
+                            KeyframeTrack(\.stretch) {
+                                CubicKeyframe(1.16, duration: 0.20)
+                                CubicKeyframe(0.97, duration: 0.14)
+                                CubicKeyframe(1.0, duration: 0.12)
+                            }
+                            KeyframeTrack(\.squash) {
+                                CubicKeyframe(0.84, duration: 0.20)
+                                CubicKeyframe(1.04, duration: 0.14)
+                                CubicKeyframe(1.0, duration: 0.12)
+                            }
+                        }
                         .offset(x: frame.minX)
-                        // Анимация висит на капсуле и покрывает все пути смены
-                        // раздела: клик, ⌘1…⌘5, открытие из меню статус-бара.
+                        // Перемещение покрывает все пути смены раздела:
+                        // клик, ⌘1…⌘5, открытие из меню статус-бара.
                         .animation(Self.flow, value: model.section)
                 }
             }
@@ -146,9 +166,6 @@ struct SettingsTabStrip: View {
             .frame(height: Palette.tabCapsuleHeight)
             // Отступ сверху: капсула не должна упираться в кнопки окна.
             .padding(.top, Palette.tabStripTopInset)
-            // Дорожка — настоящее стекло macOS 26: оно само преломляет материал
-            // титлбара и рисует кромку.
-            .glassEffect(.regular, in: Capsule(style: .continuous))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
@@ -168,6 +185,13 @@ struct SettingsTabStrip: View {
                 .glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
                 .glassEffectID("activeTab", in: namespace)
         }
+    }
+
+    /// Деформация плашки на лету: вытянуться по ходу движения и сплющиться
+    /// поперёк — это и читается как «капля», а не как едущий прямоугольник.
+    private struct Morph: Equatable {
+        var stretch: Double = 1
+        var squash: Double = 1
     }
 
     private struct TabFrames: PreferenceKey {
