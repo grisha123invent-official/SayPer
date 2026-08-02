@@ -96,28 +96,61 @@ enum KeyboardAccess {
 /// отсюда до окна не доходят.
 struct SettingsTabStrip: View {
     @ObservedObject var model: SettingsModel
+    @Namespace private var glassSpace
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(SettingsSection.allCases) { item in
-                Segment(item: item, isSelected: model.section == item) {
-                    model.section = item
-                    // Запоминается только то, куда человек перешёл сам. Открытия
-                    // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
-                    // при невыданном доступе запомненный раздел не переписывают.
-                    Settings.shared.lastSettingsSection = item
+        // Общий стеклянный контейнер: дорожка и активная капсула живут в одном
+        // пространстве стекла, поэтому при переключении капсула не прыгает,
+        // а «перетекает» — формы сливаются по дороге, как жидкое стекло.
+        GlassEffectContainer(spacing: 14) {
+            HStack(spacing: 2) {
+                ForEach(SettingsSection.allCases) { item in
+                    Segment(item: item, isSelected: model.section == item) {
+                        model.section = item
+                        // Запоминается только то, куда человек перешёл сам. Открытия
+                        // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
+                        // при невыданном доступе запомненный раздел не переписывают.
+                        Settings.shared.lastSettingsSection = item
+                    }
+                    .background {
+                        if model.section == item {
+                            ActiveCapsule()
+                                .matchedGeometryEffect(id: "activeTab", in: glassSpace)
+                        }
+                    }
                 }
             }
+            .padding(2)
+            .frame(height: Palette.tabCapsuleHeight)
+            // Дорожка — настоящее стекло macOS 26: оно само преломляет материал
+            // титлбара и рисует кромку.
+            .glassEffect(.regular, in: Capsule(style: .continuous))
         }
-        .padding(2)
-        .frame(height: Palette.tabCapsuleHeight)
-        // Дорожка — настоящее стекло macOS 26: оно само преломляет материал
-        // титлбара и рисует кромку, поэтому рукотворные блик, обводка и тень
-        // здесь больше не нужны.
-        .glassEffect(.regular, in: Capsule(style: .continuous))
+        // Один модификатор покрывает все пути смены раздела: клик, ⌘1…⌘5
+        // и открытие из меню статус-бара.
+        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: model.section)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Разделы настроек")
+    }
+
+    /// Активная вкладка: стеклянная капсула с жидким градиентом внутри —
+    /// перетекает между сегментами через `matchedGeometryEffect`.
+    private struct ActiveCapsule: View {
+        var body: some View {
+            Capsule(style: .continuous)
+                .fill(LinearGradient(
+                    colors: [
+                        Color(red: 0.22, green: 0.74, blue: 0.97).opacity(0.32),
+                        Color(red: 0.55, green: 0.36, blue: 0.96).opacity(0.28),
+                        Color(red: 0.93, green: 0.28, blue: 0.60).opacity(0.30)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ))
+                // interactive() — стекло отзывается бликом на курсор.
+                .glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
+        }
     }
 
     private struct Segment: View {
@@ -140,9 +173,11 @@ struct SettingsTabStrip: View {
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 .padding(.horizontal, Palette.spaceSm)
                 .frame(minWidth: 84, maxHeight: .infinity)
+                // Заливку выбранного сегмента рисует перетекающая ActiveCapsule
+                // уровнем выше; здесь остаётся только подсветка наведения.
                 .background(
                     Capsule(style: .continuous)
-                        .fill(fill)
+                        .fill(isHovered && !isSelected ? Palette.surfaceRowHover : .clear)
                 )
                 .contentShape(Capsule(style: .continuous))
             }
@@ -153,9 +188,5 @@ struct SettingsTabStrip: View {
             .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         }
 
-        private var fill: Color {
-            if isSelected { return Palette.surfaceTabActive }
-            return isHovered ? Palette.surfaceRowHover : .clear
-        }
     }
 }
