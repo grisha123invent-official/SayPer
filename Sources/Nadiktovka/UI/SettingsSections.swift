@@ -9,6 +9,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     /// История последних расшифровок.
     case history
+    /// Кастомизация: акцент и тема оформления.
+    case customization
     /// Ключ и расходы: статистика, API-ключ, доступ к клавиатуре, автозапуск.
     case system
 
@@ -18,6 +20,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "Диктовка"
         case .history: return "История"
+        case .customization: return "Кастомизация"
         case .system: return "Ключ и расходы"
         }
     }
@@ -26,16 +29,18 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "mic"
         case .history: return "clock.arrow.circlepath"
+        case .customization: return "paintpalette"
         case .system: return "key"
         }
     }
 
-    /// Клавиша для ⌘1…⌘3.
+    /// Клавиша для ⌘1…⌘4.
     var shortcut: Character {
         switch self {
         case .general: return "1"
         case .history: return "2"
-        case .system: return "3"
+        case .customization: return "3"
+        case .system: return "4"
         }
     }
 }

@@ -44,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.write("--- Запуск. Универсальный доступ: \(HotkeyMonitor.isTrusted ? "выдан" : "НЕТ") "
                   + "| микрофон: \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)")
 
+        // Тема применяется до создания окон: иначе первое окно успеет
+        // отрисоваться системной темой и мигнёт при переключении.
+        Settings.shared.appearanceMode.apply()
+
         // Без главного меню не работают ⌘C/⌘V в полях ввода: системные
         // сочетания правки доставляются именно через пункты меню.
         NSApp.mainMenu = buildMainMenu()

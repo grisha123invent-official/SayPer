@@ -55,6 +55,8 @@ struct SettingsRootView: View {
             SettingsSectionGeneral(model: model)
         case .history:
             SettingsSectionHistory()
+        case .customization:
+            SettingsSectionCustomization()
         case .system:
             SettingsSectionSystem(model: model)
         }
