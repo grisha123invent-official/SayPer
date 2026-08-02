@@ -6,7 +6,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recorder = AudioRecorder()
     private let hotkeys = HotkeyMonitor()
     private let indicator = RecordingIndicator()
-    private let settingsWindow = SettingsWindowController()
+    /// Создаётся по требованию. Жадная инициализация вешала запуск намертво:
+    /// SettingsModel читает ключ из связки ключей, а на этот запрос система
+    /// хочет показать диалог — которого до старта NSApplication показать негде.
+    private lazy var settingsWindow = SettingsWindowController()
     /// Превращает события хоткея в команды записи — здесь живут режимы активации.
     private let gate = RecordingGate()
     private let statusMenu = StatusMenuBuilder()
@@ -34,9 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.rotateIfNeeded()
+        // Про ключ здесь намеренно молчим: любое обращение к связке ключей
+        // на старте может заблокировать запуск ожиданием системного диалога.
         Log.write("--- Запуск. Универсальный доступ: \(HotkeyMonitor.isTrusted ? "выдан" : "НЕТ") "
-                  + "| микрофон: \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue) "
-                  + "| ключ: \(Settings.shared.apiKey == nil ? "НЕ ЗАДАН" : "задан")")
+                  + "| микрофон: \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)")
 
         // Без главного меню не работают ⌘C/⌘V в полях ввода: системные
         // сочетания правки доставляются именно через пункты меню.
@@ -99,10 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.hotkeys.resume()
         }
 
-        migrateKeychainIfNeeded()
-
         Task { @MainActor in
             _ = await AudioRecorder.requestMicrophoneAccess()
+            // Связку ключей трогаем только когда приложение уже поднялось:
+            // системный диалог должно быть кому показать.
+            migrateKeychainIfNeeded()
             checkFirstRun()
         }
     }
