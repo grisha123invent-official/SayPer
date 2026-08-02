@@ -18,13 +18,38 @@ A menu-bar dictation app for macOS. It records your voice, sends it to OpenAI Wh
 
 ## Install
 
-1. Download the `.dmg` from [Releases](https://github.com/grisha123invent-official/SayPer/releases).
-2. **Drag SayPer into Applications.** Don't run it from the disk image or from Downloads: macOS launches apps in those locations from a read-only random folder, and the permissions you grant won't survive a restart.
-3. **The first launch will be blocked.** The app is signed, but not notarised by Apple — that requires a paid Developer Program membership. Open **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway**.
+Download from [Releases](https://github.com/grisha123invent-official/SayPer/releases). Either file works — the `.dmg` is prettier, the `.zip` is smaller and gets blocked one time fewer.
+
+The app is signed but **not notarised by Apple** (notarisation needs a paid Developer Program membership), so macOS quarantines the download and refuses to open it. There are two ways past that.
+
+### One command, then everything just works
+
+Open Terminal and run this once on the downloaded file:
+
+```bash
+xattr -d com.apple.quarantine ~/Downloads/SayPer-*.dmg
+```
+
+That's it. Open the image, drag SayPer into Applications, launch it — no warnings at all. Clearing the quarantine on the image also clears it for the app inside, so you never see the security dialog.
+
+For the zip, do the same and unzip afterwards:
+
+```bash
+xattr -d com.apple.quarantine ~/Downloads/SayPer-*.zip
+```
+
+### Without Terminal
+
+1. Double-click the download. macOS says it "could not verify" the file — click **Done**, not "Move to Trash".
+2. Open **System Settings → Privacy & Security**, scroll to the bottom. There's a line about the blocked file and an **Open Anyway** button. Click it and confirm.
+3. The image opens. **Drag SayPer into Applications** — don't run it from the image or from Downloads: macOS launches apps in those places from a read-only random folder, and the permissions you grant won't survive a restart.
+4. Launch the app. **It will be blocked a second time** — the app inherits the quarantine from the image. Repeat step 2 for the app itself.
+
+The zip route skips one of those rounds: extract, drag into Applications, and you only get blocked once — on the app.
+
+Control-clicking and choosing "Open" no longer works; Apple removed that shortcut in recent macOS versions.
 
 <img src="docs/install.jpg" width="560" alt="Install window">
-
-Control-clicking the app and choosing "Open" no longer works; Apple removed that shortcut in recent macOS versions. System Settings is the only route.
 
 ## First run
 

@@ -3,6 +3,7 @@
 #   ./build.sh            — собрать в dist/
 #   ./build.sh install    — собрать и установить в /Applications, затем запустить
 #   ./build.sh dmg        — собрать образ для раздачи в dist/
+#   ./build.sh zip        — собрать архив для раздачи в dist/
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -84,6 +85,17 @@ ditto --norsrc --noextattr --noqtn "$STAGE" "$APP_DIR"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
     "${STAGE}/Contents/Info.plist")"
 
+if [ "${1:-}" = "zip" ]; then
+    ZIP="dist/${APP_NAME}-${VERSION}.zip"
+    echo "==> Архив ${ZIP}"
+    rm -f "$ZIP"
+    # ditto сохраняет подпись; --keepParent кладёт в архив саму папку .app.
+    ditto -c -k --keepParent --norsrc --noextattr "$STAGE" "$ZIP"
+    echo
+    echo "Готово: ${ZIP}  ($(du -h "$ZIP" | cut -f1))"
+    exit 0
+fi
+
 if [ "${1:-}" = "dmg" ]; then
     DMG="dist/${APP_NAME}-${VERSION}.dmg"
     echo "==> Образ ${DMG}"
@@ -162,6 +174,7 @@ if [ "${1:-}" != "install" ]; then
     echo "Готово: ${APP_DIR}  (версия ${VERSION})"
     echo "  Установить: ./build.sh install"
     echo "  Собрать образ: ./build.sh dmg"
+    echo "  Собрать архив: ./build.sh zip"
     exit 0
 fi
 
