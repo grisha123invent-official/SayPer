@@ -103,16 +103,18 @@ struct SettingsTabStrip: View {
     /// в каждом сегменте: условная вставка даёт скачок, а не перетекание.
     @State private var frames: [SettingsSection: CGRect] = [:]
 
-    private static let flow = Animation.spring(response: 0.5, dampingFraction: 0.72)
+    /// Без отскока: пружина с недостаточным затуханием читается как дёрганье.
+    private static let flow = Animation.smooth(duration: 0.42, extraBounce: 0)
 
     var body: some View {
         GlassEffectContainer(spacing: 14) {
             HStack(spacing: 2) {
                 ForEach(SettingsSection.allCases) { item in
                     Segment(item: item, isSelected: model.section == item) {
-                        withAnimation(Self.flow) {
-                            model.section = item
-                        }
+                        // Анимацию задаёт сама капсула. Оборачивать смену ещё и
+                        // в withAnimation нельзя: две анимации на одно изменение
+                        // дерутся между собой и дают рывок.
+                        model.section = item
                         // Запоминается только то, куда человек перешёл сам. Открытия
                         // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
                         // при невыданном доступе запомненный раздел не переписывают.
@@ -151,7 +153,7 @@ struct SettingsTabStrip: View {
         .accessibilityLabel("Разделы настроек")
     }
 
-    /// Активная вкладка: стеклянная капсула с жидким градиентом внутри.
+    /// Активная вкладка: чистое стекло, без заливки и без подкраски.
     /// `glassEffectID` внутри контейнера — родной механизм слияния стекла:
     /// по дороге капсула сплавляется с дорожкой, а не летит поверх неё.
     private struct ActiveCapsule: View {
@@ -159,15 +161,7 @@ struct SettingsTabStrip: View {
 
         var body: some View {
             Capsule(style: .continuous)
-                .fill(LinearGradient(
-                    colors: [
-                        Color(red: 0.22, green: 0.74, blue: 0.97).opacity(0.32),
-                        Color(red: 0.55, green: 0.36, blue: 0.96).opacity(0.28),
-                        Color(red: 0.93, green: 0.28, blue: 0.60).opacity(0.30)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                ))
+                .fill(.clear)
                 // interactive() — стекло отзывается бликом на курсор.
                 .glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
                 .glassEffectID("activeTab", in: namespace)
@@ -199,7 +193,11 @@ struct SettingsTabStrip: View {
                         .font(.system(size: 15))
                         .symbolRenderingMode(.hierarchical)
                     Text(item.title)
-                        .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                        // Вес постоянный. Раньше выбранная вкладка становилась
+                        // medium — от этого менялась ширина сегмента, кадры
+                        // разъезжались, и капсула дёргалась, догоняя их.
+                        // Выделение несёт стекло и цвет подписи, не насыщенность.
+                        .font(.system(size: 11, weight: .medium))
                         .lineLimit(1)
                 }
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
