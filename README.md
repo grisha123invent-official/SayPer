@@ -83,7 +83,7 @@ Internals, signing and troubleshooting are documented in [docs/development.md](d
 
 ## Take it and change it
 
-The whole app is here — 45 Swift files, no dependencies, no package manager. Clone it, run `./build.sh install`, and you have your own copy running in a minute. Change the hotkey behaviour, swap Whisper for a local model, restyle the window — it's yours to bend.
+The whole app is here — 52 Swift files, no dependencies, no package manager. Clone it, run `./build.sh install`, and you have your own copy running in a minute. Change the hotkey behaviour, swap Whisper for a local model, restyle the window — it's yours to bend.
 
 Pull requests and issues are welcome. If you're poking at the interface, [design/](design/) documents the tokens and component states everything is built from.
 
