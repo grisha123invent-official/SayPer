@@ -390,36 +390,43 @@ struct SwitchToggle: View {
 /// ней, включённое состояние подкрашивается акцентом. Системный `.switch`
 /// рисует плоскую заливку и рядом со стеклянным окном смотрится чужеродно.
 struct GlassSwitchStyle: ToggleStyle {
-    private let trackWidth: CGFloat = 42
-    private let trackHeight: CGFloat = 24
-    private var knobSize: CGFloat { trackHeight - 6 }
+    private let trackWidth: CGFloat = 48
+    private let trackHeight: CGFloat = 22
+    /// Линза крупнее дорожки и свешивается за её края — как в референсе,
+    /// где стеклянный кругляш «сидит» поверх синей полосы, а не внутри неё.
+    private var knobSize: CGFloat { trackHeight + 6 }
 
     func makeBody(configuration: Configuration) -> some View {
         HStack {
             configuration.label
             Capsule()
-                // Включённое состояние — акцент, приглушённый до состояния
-                // подсветки под стеклом. Сплошная синяя заливка перебивала
-                // стекло, и переключатель читался как обычный системный.
+                // Дорожка включённого — яркий акцент: он и есть цвет контрола,
+                // а стеклянная линза сверху его преломляет.
                 .fill(configuration.isOn
-                      ? AnyShapeStyle(Color.accentColor.opacity(0.34))
-                      : AnyShapeStyle(Color.white.opacity(0.08)))
+                      ? AnyShapeStyle(Color.accentColor)
+                      : AnyShapeStyle(Color.white.opacity(0.10)))
                 .frame(width: trackWidth, height: trackHeight)
-                .glassEffect(.clear.interactive(), in: Capsule())
                 // Кромка дорожки: без неё выключенный переключатель
                 // растворяется в панели.
                 .overlay(
                     Capsule().strokeBorder(Palette.rimGlass, lineWidth: 1)
                 )
                 .overlay(
+                    // Линза: прозрачное стекло со светлой кромкой, сквозь
+                    // которое видно дорожку. Глухой белый кружок закрывал
+                    // цвет собой и стеклом не читался.
                     Circle()
-                        // Бегунок тоже стеклянный, а не глухой белый кружок:
-                        // сквозь него видно подсветку дорожки.
-                        .fill(.white.opacity(configuration.isOn ? 0.95 : 0.72))
-                        .glassEffect(.clear, in: Circle())
-                        .shadow(color: .black.opacity(0.22), radius: 1.5, y: 1)
-                        .frame(width: knobSize, height: knobSize)
-                        .padding(3),
+                        .fill(.white.opacity(0.22))
+                        .glassEffect(.clear.interactive(), in: Circle())
+                        // Светлый вид: в тёмной теме стекло тонируется
+                        // в тёмное, и линза выходила чёрным кругляшом
+                        // вместо прозрачной.
+                        .environment(\.colorScheme, .light)
+                        .overlay(
+                            Circle().strokeBorder(.white.opacity(0.75), lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.28), radius: 3, y: 1)
+                        .frame(width: knobSize, height: knobSize),
                     alignment: configuration.isOn ? .trailing : .leading
                 )
                 .animation(.snappy(duration: 0.18), value: configuration.isOn)
