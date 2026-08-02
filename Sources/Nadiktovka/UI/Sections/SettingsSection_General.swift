@@ -11,6 +11,9 @@ struct SettingsSectionGeneral: View {
 
     @FocusState private var vocabularyFocused: Bool
 
+    @State private var duckMode = Settings.shared.duckMode
+    @State private var duckLevel = Settings.shared.duckLevel
+
     private let languages: [(String, String)] = [
         ("", "Автоопределение"),
         ("ru", "Русский"),
@@ -56,6 +59,36 @@ struct SettingsSectionGeneral: View {
         GlassCard("Во время записи") {
             SwitchToggle("Показывать индикатор", isOn: $model.showIndicator)
             SwitchToggle("Звуковые сигналы", isOn: $model.playSounds)
+
+            SettingRow(
+                "Звук компьютера",
+                subtitle: "Музыка и видео лезут в микрофон и портят расшифровку"
+            ) {
+                SegmentedControl(selection: $duckMode, options: OutputDucker.Mode.allCases,
+                                 compact: true) { $0.title }
+                    .frame(width: 230)
+            }
+            .onChange(of: duckMode) { _, newValue in
+                Settings.shared.duckMode = newValue
+            }
+
+            // Ползунок нужен только в режиме «Убавить»: в остальных
+            // уровень ни на что не влияет и только сбивал бы с толку.
+            if duckMode == .dim {
+                SettingRow("Насколько убавлять") {
+                    HStack(spacing: Palette.spaceSm) {
+                        Slider(value: $duckLevel, in: 0.05...0.9)
+                            .frame(width: 170)
+                        Text("\(Int((duckLevel * 100).rounded()))%")
+                            .font(.body.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                }
+                .onChange(of: duckLevel) { _, newValue in
+                    Settings.shared.duckLevel = newValue
+                }
+            }
         }
     }
 

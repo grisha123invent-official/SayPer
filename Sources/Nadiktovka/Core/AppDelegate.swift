@@ -117,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        OutputDucker.restore()
         hotkeys.stopWatchdog()
         hotkeys.stop()
         recorder.cancel()
@@ -344,6 +345,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             try recorder.start()
+            // Музыка и видео лезут в микрофон, поэтому глушим их на время
+            // записи. Возврат — в каждой точке выхода из неё.
+            OutputDucker.duck()
             status = .recording
             indicator.setHint(gate.currentHint)
             indicator.show(.recording)
@@ -357,6 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func abortRecording() {
         guard recorder.isRecording else { return }
+        OutputDucker.restore()
         recorder.cancel()
         gate.recordingDidStop()
         indicator.hide()
@@ -364,6 +369,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishRecording() {
+        // Звук возвращаем сразу после остановки записи: пока идёт расшифровка,
+        // микрофон уже не слушает и глушить нечего.
+        OutputDucker.restore()
+
         let stopped = recorder.stop()
         gate.recordingDidStop()
         guard let result = stopped else { return }
@@ -483,6 +492,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func fail(_ message: String) {
+        // Страховка: если запись оборвалась ошибкой, приглушение не должно
+        // остаться висеть до перезапуска.
+        OutputDucker.restore()
         Log.write("ОШИБКА: \(message)")
         status = .failed(message)
         indicator.show(.error(shortMessage(message)))
