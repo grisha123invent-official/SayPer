@@ -6,7 +6,7 @@ Hold a key, speak, release — the text lands wherever your cursor is.
 
 A menu-bar dictation app for macOS. It records your voice, sends it to OpenAI Whisper, and inserts the result into whatever app you were typing in. No window, no Dock icon.
 
-<img src="docs/pill.png" width="480" alt="Recording indicator">
+<img src="docs/pill.jpg" width="480" alt="Recording indicator">
 
 > **The interface is in Russian only.** Every label, menu and prompt inside the app is Russian; an English localisation isn't done yet. Transcription itself works in any language Whisper supports.
 
@@ -22,7 +22,7 @@ A menu-bar dictation app for macOS. It records your voice, sends it to OpenAI Wh
 2. **Drag SayPer into Applications.** Don't run it from the disk image or from Downloads: macOS launches apps in those locations from a read-only random folder, and the permissions you grant won't survive a restart.
 3. **The first launch will be blocked.** The app is signed, but not notarised by Apple — that requires a paid Developer Program membership. Open **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway**.
 
-<img src="docs/install.png" width="560" alt="Install window">
+<img src="docs/install.jpg" width="560" alt="Install window">
 
 Control-clicking the app and choosing "Open" no longer works; Apple removed that shortcut in recent macOS versions. System Settings is the only route.
 
@@ -45,7 +45,7 @@ Hold your hotkey, speak, let go. The text appears where the cursor is.
 
 ## What else it does
 
-<img src="docs/settings.png" width="560" alt="Settings">
+<img src="docs/settings.jpg" width="560" alt="Settings">
 
 - **History** of everything transcribed, kept locally. Copy or re-insert any entry.
 - **Spending** — the app estimates what you've spent with OpenAI, by day and by month.
@@ -81,6 +81,16 @@ Command Line Tools are enough — no Xcode, no package manager.
 
 Internals, signing and troubleshooting are documented in [docs/development.md](docs/development.md) — in Russian.
 
+## Take it and change it
+
+The whole app is here — 45 Swift files, no dependencies, no package manager. Clone it, run `./build.sh install`, and you have your own copy running in a minute. Change the hotkey behaviour, swap Whisper for a local model, restyle the window — it's yours to bend.
+
+Pull requests and issues are welcome. If you're poking at the interface, [design/](design/) documents the tokens and component states everything is built from.
+
 ## Status
 
-Beta. It works and gets used daily; rough edges are expected. Issues and ideas are welcome.
+Beta. It works and gets used daily; rough edges are expected.
+
+## Licence
+
+[MIT](LICENSE) — do what you want with it, just keep the copyright notice.
