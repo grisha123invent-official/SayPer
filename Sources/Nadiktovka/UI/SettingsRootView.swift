@@ -34,7 +34,14 @@ struct SettingsRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // L2: подложка панели раздела. Почти непрозрачна — читаемый текст
             // никогда не лежит на стекле шасси напрямую (`tokens.md` §1).
-            .background(VisualEffectBackground(material: .contentBackground))
+            // Поверх неё — слабое цветное свечение: без него стеклу нечего
+            // преломлять и оно выглядит плоской заливкой.
+            .background(
+                ZStack {
+                    VisualEffectBackground(material: .contentBackground)
+                    AmbientGlow()
+                }
+            )
         }
         // Пока доступа нет, главное действие на экране — «Выдать доступ»,
         // поэтому акцентные кнопки внутри карточек гаснут (П6).
