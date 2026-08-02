@@ -198,7 +198,7 @@ struct StatusMenuSections {
         if !context.today.isEmpty {
             let usage = item(Self.todayTitle(context.today),
                              #selector(StatusMenuBuilder.openSettings))
-            usage.representedObject = SettingsSection.usage.rawValue
+            usage.representedObject = SettingsSection.system.rawValue
             items.append(usage)
         }
 

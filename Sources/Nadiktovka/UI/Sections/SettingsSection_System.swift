@@ -1,7 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Раздел «Ключ и доступ»: то, что настраивают один раз при установке.
+/// Раздел «Ключ и расходы»: сколько потрачено и чем это оплачивается.
+///
+/// Расходы сверху — на них смотрят чаще, чем правят ключ. Ниже то, что
+/// настраивают один раз при установке: ключ, доступ к клавиатуре, автозапуск.
 struct SettingsSectionSystem: View {
     @ObservedObject var model: SettingsModel
 
@@ -9,6 +12,7 @@ struct SettingsSectionSystem: View {
 
     var body: some View {
         SectionScaffold {
+            UsageBlock()
             openAI
             keyboardAccess
             system

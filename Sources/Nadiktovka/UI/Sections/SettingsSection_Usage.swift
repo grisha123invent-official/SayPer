@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Раздел «Расходы»: минуты, слова и оценка стоимости.
+/// Блок «Расходы» раздела «Ключ и расходы»: минуты, слова и оценка стоимости.
 ///
-/// Раздел прокручивается — это норма: четыре плитки, график за месяц и разбивка
-/// по моделям в 540pt по высоте не помещаются, а ужимать график ради того, чтобы
-/// всё было видно сразу, значит сделать его нечитаемым.
-struct SettingsSectionUsage: View {
+/// Своего раздела у расходов больше нет — они и настройки ключа относятся
+/// к одному: сколько это стоит и чем оплачивается. Блок отдаёт карточки,
+/// а обёртку с прокруткой заводит раздел.
+struct UsageBlock: View {
     @ObservedObject private var store = UsageStore.shared
 
     @State private var period = Settings.shared.usagePeriod
@@ -14,7 +14,7 @@ struct SettingsSectionUsage: View {
     @State private var isConfirmingReset = false
 
     var body: some View {
-        SectionScaffold {
+        Group {
             expenses
 
             // «По моделям» — разрез выбранного периода, поэтому и показывается
@@ -53,7 +53,6 @@ struct SettingsSectionUsage: View {
 
     private var expenses: some View {
         GlassCard("Расходы", accessory: AnyView(periodPicker), separated: true) {
-            CardDivider()
 
             tiles
 
@@ -107,7 +106,7 @@ struct SettingsSectionUsage: View {
     /// когда запись была десять дней назад, а период стоит «7 дней».
     private var emptyState: some View {
         HStack(spacing: Palette.spaceXs) {
-            Image(systemName: SettingsSection.usage.symbol)
+            Image(systemName: "chart.bar")
                 .font(.system(size: 15))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)

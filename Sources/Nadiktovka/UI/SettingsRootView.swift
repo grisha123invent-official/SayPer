@@ -55,8 +55,6 @@ struct SettingsRootView: View {
             SettingsSectionGeneral(model: model)
         case .history:
             SettingsSectionHistory()
-        case .usage:
-            SettingsSectionUsage()
         case .system:
             SettingsSectionSystem(model: model)
         }
@@ -125,7 +123,7 @@ struct SettingsTabStrip: View {
                     // дерутся между собой и дают рывок.
                     model.section = item
                     // Запоминается только то, куда человек перешёл сам. Открытия
-                    // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
+                    // из меню (`show(.system)`) и принудительный «Ключ и расходы»
                     // при невыданном доступе запомненный раздел не переписывают.
                     Settings.shared.lastSettingsSection = item
                 }

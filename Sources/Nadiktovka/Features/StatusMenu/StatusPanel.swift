@@ -337,7 +337,7 @@ private struct StatusPanelView: View {
     /// в раздел «Расходы», где та же статистика подробно.
     private var usage: some View {
         Button {
-            model.actions?.menuOpenSettings(.usage)
+            model.actions?.menuOpenSettings(.system)
             dismiss()
         } label: {
             HStack(spacing: 6) {
