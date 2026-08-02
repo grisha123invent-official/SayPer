@@ -89,9 +89,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.contentMinSize = Self.minSize
-        // Ширина фиксирована по мокапу, тянется только высота: колонка контента
-        // всё равно упирается в 640, а широкое окно оставляет пустые поля.
-        window.contentMaxSize = NSSize(width: Self.size.width, height: .greatestFiniteMagnitude)
+        // Окно тянется и по ширине: колонка карточек растягивается вместе с ним
+        // до Palette.contentWidth, дальше остаётся по центру.
         window.setContentSize(Self.size)
         window.center()
 
