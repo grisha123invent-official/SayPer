@@ -98,26 +98,46 @@ struct SettingsTabStrip: View {
     @ObservedObject var model: SettingsModel
     @Namespace private var glassSpace
 
+    /// Кадры сегментов в системе координат полосы. Нужны, чтобы активная
+    /// капсула была ОДНОЙ вьюхой, которая ездит, а не появлялась заново
+    /// в каждом сегменте: условная вставка даёт скачок, а не перетекание.
+    @State private var frames: [SettingsSection: CGRect] = [:]
+
+    private static let flow = Animation.spring(response: 0.5, dampingFraction: 0.72)
+
     var body: some View {
-        // Общий стеклянный контейнер: дорожка и активная капсула живут в одном
-        // пространстве стекла, поэтому при переключении капсула не прыгает,
-        // а «перетекает» — формы сливаются по дороге, как жидкое стекло.
         GlassEffectContainer(spacing: 14) {
             HStack(spacing: 2) {
                 ForEach(SettingsSection.allCases) { item in
                     Segment(item: item, isSelected: model.section == item) {
-                        model.section = item
+                        withAnimation(Self.flow) {
+                            model.section = item
+                        }
                         // Запоминается только то, куда человек перешёл сам. Открытия
                         // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
                         // при невыданном доступе запомненный раздел не переписывают.
                         Settings.shared.lastSettingsSection = item
                     }
                     .background {
-                        if model.section == item {
-                            ActiveCapsule()
-                                .matchedGeometryEffect(id: "activeTab", in: glassSpace)
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: TabFrames.self,
+                                value: [item: proxy.frame(in: .named("tabStrip"))]
+                            )
                         }
                     }
+                }
+            }
+            .coordinateSpace(name: "tabStrip")
+            .onPreferenceChange(TabFrames.self) { frames = $0 }
+            .background(alignment: .leading) {
+                if let frame = frames[model.section] {
+                    ActiveCapsule(namespace: glassSpace)
+                        .frame(width: frame.width, height: frame.height)
+                        .offset(x: frame.minX)
+                        // Анимация висит на капсуле и покрывает все пути смены
+                        // раздела: клик, ⌘1…⌘5, открытие из меню статус-бара.
+                        .animation(Self.flow, value: model.section)
                 }
             }
             .padding(2)
@@ -126,17 +146,17 @@ struct SettingsTabStrip: View {
             // титлбара и рисует кромку.
             .glassEffect(.regular, in: Capsule(style: .continuous))
         }
-        // Один модификатор покрывает все пути смены раздела: клик, ⌘1…⌘5
-        // и открытие из меню статус-бара.
-        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: model.section)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Разделы настроек")
     }
 
-    /// Активная вкладка: стеклянная капсула с жидким градиентом внутри —
-    /// перетекает между сегментами через `matchedGeometryEffect`.
+    /// Активная вкладка: стеклянная капсула с жидким градиентом внутри.
+    /// `glassEffectID` внутри контейнера — родной механизм слияния стекла:
+    /// по дороге капсула сплавляется с дорожкой, а не летит поверх неё.
     private struct ActiveCapsule: View {
+        let namespace: Namespace.ID
+
         var body: some View {
             Capsule(style: .continuous)
                 .fill(LinearGradient(
@@ -150,6 +170,18 @@ struct SettingsTabStrip: View {
                 ))
                 // interactive() — стекло отзывается бликом на курсор.
                 .glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
+                .glassEffectID("activeTab", in: namespace)
+        }
+    }
+
+    private struct TabFrames: PreferenceKey {
+        static let defaultValue: [SettingsSection: CGRect] = [:]
+
+        static func reduce(
+            value: inout [SettingsSection: CGRect],
+            nextValue: () -> [SettingsSection: CGRect]
+        ) {
+            value.merge(nextValue()) { _, new in new }
         }
     }
 
