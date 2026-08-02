@@ -34,10 +34,17 @@ enum TranscriptionModel: String, CaseIterable, Identifiable {
 }
 
 /// Настройки приложения. Всё, кроме API-ключа, лежит в UserDefaults.
+///
+/// Свои настройки каждая функция объявляет в отдельном файле `Settings+<Что>.swift`
+/// через типизированные хелперы внизу этого файла. Общий `register(defaults:)`
+/// намеренно не расширяется: значение по умолчанию задаётся прямо в месте чтения.
+/// Префиксы ключей: `ui.*` — оформление, `menu.*` — меню, `history.*` — история,
+/// `usage.*` — расходы, `record.*` — запись.
 final class Settings {
     static let shared = Settings()
 
-    private let defaults = UserDefaults.standard
+    /// Не private: типизированные хелперы и файлы `Settings+*.swift` работают через него.
+    let defaults = UserDefaults.standard
 
     private enum Key {
         static let hotkeyMask = "hotkeyMask"
@@ -134,4 +141,47 @@ final class Settings {
     }
 
     var apiKey: String? { Keychain.readAPIKey() }
+}
+
+// MARK: - Типизированный доступ к UserDefaults
+
+/// Хелперы для настроек, объявленных в `Settings+*.swift`. Значение по умолчанию
+/// передаётся аргументом, поэтому регистрировать его отдельно не нужно —
+/// и разные функции не спорят за один общий словарь.
+extension Settings {
+    func flag(_ key: String, default fallback: Bool = false) -> Bool {
+        defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
+    }
+
+    func text(_ key: String, default fallback: String = "") -> String {
+        defaults.string(forKey: key) ?? fallback
+    }
+
+    func number(_ key: String, default fallback: Int = 0) -> Int {
+        defaults.object(forKey: key) == nil ? fallback : defaults.integer(forKey: key)
+    }
+
+    func decimal(_ key: String, default fallback: Double = 0) -> Double {
+        defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key)
+    }
+
+    /// Запись значения. `nil` удаляет ключ, возвращая настройку к умолчанию.
+    func set(_ value: Any?, forKey key: String) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    /// Разбор JSON-значения. Битые данные считаем отсутствующими, а не падаем.
+    func decoded<T: Decodable>(_ type: T.Type, forKey key: String) -> T? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    func encode<T: Encodable>(_ value: T, forKey key: String) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        defaults.set(data, forKey: key)
+    }
 }

@@ -13,6 +13,7 @@ final class RecordingIndicator {
     private var panel: NSPanel?
     private var glass: GlassIndicatorView?
     private var hideTimer: Timer?
+    private var hint: String?
 
     func show(_ state: State) {
         hideTimer?.invalidate()
@@ -21,6 +22,7 @@ final class RecordingIndicator {
         guard Settings.shared.showIndicator else { return }
 
         let panel = self.panel ?? makePanel()
+        glass?.hint = hint
         glass?.apply(state)
         resize(panel, animated: panel.isVisible)
         position(panel)
@@ -47,6 +49,18 @@ final class RecordingIndicator {
 
     func update(level: Float) {
         glass?.level = level
+    }
+
+    /// Подсказка режима записи рядом с подписью: `nil` — подсказки нет.
+    /// В режиме удержания она не нужна, её задаёт «Нажал-нажал».
+    func setHint(_ hint: String?) {
+        guard hint != self.hint else { return }
+        self.hint = hint
+        glass?.hint = hint
+
+        if let panel, panel.isVisible {
+            resize(panel, animated: true)
+        }
     }
 
     /// Секунды ожидания ответа — чтобы длинная расшифровка не выглядела зависшей.
@@ -143,6 +157,10 @@ private final class GlassIndicatorView: NSView {
 
     var elapsed: TimeInterval = 0 {
         didSet { content.elapsed = elapsed }
+    }
+
+    var hint: String? {
+        didSet { content.hint = hint }
     }
 
     /// Пилюля тянется под длину подписи, чтобы не оставалось пустого места.
@@ -263,6 +281,10 @@ private final class IndicatorContentView: NSView {
         didSet { needsDisplay = true }
     }
 
+    var hint: String? {
+        didSet { needsDisplay = true }
+    }
+
     private var phase: CGFloat = 0
     private var timer: Timer?
 
@@ -352,7 +374,8 @@ private final class IndicatorContentView: NSView {
     private func title() -> String {
         switch state {
         case .recording:
-            return "Слушаю"
+            guard let hint, !hint.isEmpty else { return "Слушаю" }
+            return "Слушаю · \(hint)"
         case .transcribing:
             // После пары секунд показываем счётчик — видно, что процесс идёт.
             return elapsed >= 2 ? "Расшифровываю \(Int(elapsed)) с" : "Расшифровываю"

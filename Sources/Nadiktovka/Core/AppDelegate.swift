@@ -7,6 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeys = HotkeyMonitor()
     private let indicator = RecordingIndicator()
     private let settingsWindow = SettingsWindowController()
+    /// Превращает события хоткея в команды записи — здесь живут режимы активации.
+    private let gate = RecordingGate()
+    private let statusMenu = StatusMenuBuilder()
 
     private var lastText: String?
     private var isBusy = false
@@ -39,6 +42,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // сочетания правки доставляются именно через пункты меню.
         NSApp.mainMenu = buildMainMenu()
 
+        // История и расходы слушают шину — оркестровка записи о них не знает.
+        TranscriptionBus.register(HistoryStore.shared)
+        TranscriptionBus.register(UsageStore.shared)
+
+        statusMenu.actions = self
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         renderStatusItem()
 
@@ -46,10 +55,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.indicator.update(level: level)
         }
 
-        hotkeys.onPress = { [weak self] in self?.beginRecording() }
-        hotkeys.onRelease = { [weak self] in self?.finishRecording() }
-        hotkeys.onCancel = { [weak self] in self?.abortRecording() }
-        hotkeys.onEscape = { [weak self] in self?.abortEverything() }
+        gate.onCommand = { [weak self] command in
+            guard let self else { return }
+            switch command {
+            case .begin: self.beginRecording()
+            case .finish: self.finishRecording()
+            case .abort: self.abortRecording()
+            }
+        }
+
+        hotkeys.onPress = { [weak self] in self?.gate.hotkeyPressed() }
+        hotkeys.onRelease = { [weak self] in self?.gate.hotkeyReleased() }
+        hotkeys.onCancel = { [weak self] in self?.gate.hotkeyCancelled() }
+        hotkeys.onEscape = { [weak self] in
+            guard let self else { return }
+            // Шлюз забирает Esc себе только там, где сам держит запись.
+            if !self.gate.escapePressed() {
+                self.abortEverything()
+            }
+        }
         hotkeys.onSetupFailed = { [weak self] in
             self?.fail("нет доступа к клавиатуре — выдай «Универсальный доступ»")
         }
@@ -61,7 +85,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeys.start()
 
-        settingsWindow.model.onHotkeyChange = { [weak self] in self?.hotkeys.reload() }
+        settingsWindow.model.onHotkeyChange = { [weak self] in
+            self?.hotkeys.reload()
+            self?.gate.reload()
+        }
 
         // Пока в настройках записывают новое сочетание, глобальный перехват молчит.
         let center = NotificationCenter.default
@@ -172,60 +199,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }()
 
-        statusItem.menu = buildMenu()
-    }
-
-    private func buildMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        let statusText: String
-        switch status {
-        case .idle:
-            statusText = "Готово · зажми \(Settings.shared.hotkey.displayString)"
-        case .recording:
-            statusText = "Идёт запись…"
-        case .transcribing:
-            statusText = "Расшифровка…"
-        case .failed(let message):
-            statusText = "Ошибка: \(message)"
-        }
-        let statusRow = NSMenuItem(title: statusText, action: nil, keyEquivalent: "")
-        statusRow.isEnabled = false
-        menu.addItem(statusRow)
-
-        menu.addItem(.separator())
-
-        if let lastText {
-            let preview = lastText.count > 60 ? String(lastText.prefix(60)) + "…" : lastText
-            let item = NSMenuItem(title: "Скопировать: «\(preview)»",
-                                  action: #selector(copyLast),
-                                  keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-            menu.addItem(.separator())
-        }
-
-        let settings = NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
-
-        if !hotkeys.isActive {
-            let access = NSMenuItem(title: "Выдать доступ к клавиатуре…",
-                                    action: #selector(requestKeyboardAccess),
-                                    keyEquivalent: "")
-            access.target = self
-            menu.addItem(access)
-        }
-
-        let diagnostics = NSMenuItem(title: "Диагностика…", action: #selector(showDiagnostics), keyEquivalent: "")
-        diagnostics.target = self
-        menu.addItem(diagnostics)
-
-        let quit = NSMenuItem(title: "Выйти", action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-
-        return menu
+        statusMenu.lastText = lastText
+        statusItem.menu = statusMenu.build()
     }
 
     @objc private func openSettings() {
@@ -233,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Просит оба разрешения, нужных для перехвата клавиш, и открывает нужную панель.
-    @objc private func requestKeyboardAccess() {
+    private func requestKeyboardAccess() {
         Log.write("Запрашиваю доступ к клавиатуре. Универсальный доступ: \(HotkeyMonitor.isTrusted) "
                   + "| мониторинг ввода: \(HotkeyMonitor.inputMonitoringStatus)")
 
@@ -278,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(url)
     }
 
-    @objc private func showDiagnostics() {
+    private func showDiagnostics() {
         let micStatus: String
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: micStatus = "разрешён"
@@ -322,12 +297,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func copyLast() {
-        guard let lastText else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(lastText, forType: .string)
-    }
-
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -346,10 +315,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try recorder.start()
             status = .recording
+            indicator.setHint(gate.currentHint)
             indicator.show(.recording)
             play("Tink")
             Log.write("Запись пошла")
         } catch {
+            gate.recordingDidStop()
             fail(error.localizedDescription)
         }
     }
@@ -357,12 +328,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func abortRecording() {
         guard recorder.isRecording else { return }
         recorder.cancel()
+        gate.recordingDidStop()
         indicator.hide()
         status = .idle
     }
 
     private func finishRecording() {
-        guard let result = recorder.stop() else { return }
+        let stopped = recorder.stop()
+        gate.recordingDidStop()
+        guard let result = stopped else { return }
 
         guard result.duration >= minimumDuration else {
             Log.write("Запись отброшена: всего \(String(format: "%.2f", result.duration)) с")
@@ -382,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isBusy = true
         startElapsedTimer()
 
+        let startedAt = Date()
         transcription = Task { @MainActor in
             defer {
                 isBusy = false
@@ -400,6 +375,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 status = .idle
                 TextInserter.deliver(text, mode: Settings.shared.insertMode)
                 play("Purr")
+
+                TranscriptionBus.publish(TranscriptionRecord(
+                    text: text,
+                    audioDuration: result.duration,
+                    latency: Date().timeIntervalSince(startedAt),
+                    modelID: Settings.shared.model.rawValue,
+                    language: Settings.shared.language,
+                    cleanupUsed: Settings.shared.cleanup
+                ))
             } catch {
                 // Отмена приходит и как CancellationError, и как URLError(.cancelled) —
                 // это не сбой, ругаться на неё не надо.
@@ -480,5 +464,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func play(_ name: String) {
         guard Settings.shared.playSounds else { return }
         NSSound(named: name)?.play()
+    }
+}
+
+// MARK: - Меню в строке статуса
+
+/// Реализация целиком, включая пункты, которых в меню пока нет: контракт
+/// заморожен, чтобы слайс «Меню» верстал пункты, не возвращаясь сюда.
+extension AppDelegate: StatusMenuActions {
+    var menuStatusTitle: String {
+        switch status {
+        case .idle: return "Готово · зажми \(Settings.shared.hotkey.displayString)"
+        case .recording: return "Идёт запись…"
+        case .transcribing: return "Расшифровка…"
+        case .failed(let message): return "Ошибка: \(message)"
+        }
+    }
+
+    var isHotkeyActive: Bool { hotkeys.isActive }
+
+    func menuOpenSettings(_ section: SettingsSection) {
+        settingsWindow.show(section)
+    }
+
+    func menuCopy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    func menuInsertAgain(_ text: String) {
+        TextInserter.deliver(text, mode: Settings.shared.insertMode)
+    }
+
+    func menuShowDiagnostics() {
+        showDiagnostics()
+    }
+
+    func menuRequestKeyboardAccess() {
+        requestKeyboardAccess()
+    }
+
+    func menuToggleSounds() {
+        Settings.shared.playSounds = !Settings.shared.playSounds
+        settingsWindow.model.playSounds = Settings.shared.playSounds
+        renderStatusItem()
+    }
+
+    func menuQuit() {
+        NSApp.terminate(nil)
     }
 }

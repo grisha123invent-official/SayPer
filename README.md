@@ -60,17 +60,29 @@ Command Line Tools (`xcode-select --install`), Xcode не требуется.
 
 ## Устройство
 
+Исходники разложены по папкам внутри `Sources/Nadiktovka`; `build.sh` обходит
+дерево целиком, так что новый файл достаточно положить в нужную папку.
+
 | Файл | Что делает |
 |---|---|
-| `AppDelegate.swift` | строка меню, состояния, склейка всего вместе |
-| `HotkeyMonitor.swift` | глобальное отслеживание нажатия/отпускания модификатора |
-| `AudioRecorder.swift` | AVAudioEngine → 16 kHz mono AAC + уровень громкости |
-| `Transcriber.swift` | `/v1/audio/transcriptions` и необязательная чистка текста |
-| `TextInserter.swift` | ⌘V через CGEvent либо посимвольный ввод юникода |
-| `RecordingIndicator.swift` | плавающая пилюля с эквалайзером |
-| `SettingsWindow.swift` | окно настроек на SwiftUI |
-| `Keychain.swift` | хранение API-ключа |
-| `LaunchAtLogin.swift` | автозапуск через `SMAppService` |
+| `Core/AppDelegate.swift` | состояния, оркестровка записи, склейка всего вместе |
+| `Core/Settings.swift` | настройки в UserDefaults и типизированный доступ к ним |
+| `Core/AppEvents.swift` | `TranscriptionRecord` и шина, по которой уходит готовая расшифровка |
+| `Core/AppPaths.swift` | папка `~/Library/Application Support/Надиктовка` |
+| `Core/Keychain.swift` | хранение API-ключа |
+| `Core/LaunchAtLogin.swift` | автозапуск через `SMAppService` |
+| `Hotkey/HotkeyMonitor.swift` | глобальное отслеживание нажатия/отпускания модификатора |
+| `Audio/AudioRecorder.swift` | AVAudioEngine → 16 kHz mono AAC + уровень громкости |
+| `Audio/Transcriber.swift` | `/v1/audio/transcriptions` и необязательная чистка текста |
+| `Audio/TextInserter.swift` | ⌘V через CGEvent либо посимвольный ввод юникода |
+| `UI/RecordingIndicator.swift` | плавающая пилюля с эквалайзером |
+| `UI/DesignSystem.swift` | токены и общие кирпичики окна настроек |
+| `UI/SettingsRootView.swift` | окно настроек: полоса разделов и панель раздела |
+| `UI/Sections/` | по файлу на раздел настроек |
+| `Features/Recording/RecordingGate.swift` | режим активации: события хоткея → команды записи |
+| `Features/StatusMenu/StatusMenuBuilder.swift` | меню в строке статуса |
+| `Features/History/HistoryStore.swift` | последние расшифровки |
+| `Features/Usage/UsageStore.swift` | минуты, слова и оценка стоимости |
 | `Tools/MakeIcon.swift` | генерация иконки в `.iconset` при сборке |
 
 Запись идёт во временный файл и удаляется сразу после расшифровки.

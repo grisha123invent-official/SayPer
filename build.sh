@@ -15,12 +15,25 @@ TARGET="$(uname -m)-apple-macos13.0"
 
 echo "==> Компиляция"
 mkdir -p build
+
+# Исходники разложены по подпапкам, поэтому собираем их обходом дерева,
+# а не плоским глобом. sort нужен для повторяемости порядка аргументов.
+SOURCES=()
+while IFS= read -r file; do
+    SOURCES+=("$file")
+done < <(find Sources/Nadiktovka -name '*.swift' | sort)
+
+if [ "${#SOURCES[@]}" -eq 0 ]; then
+    echo "Не найдено ни одного .swift в Sources/Nadiktovka" >&2
+    exit 1
+fi
+
 swiftc \
     -swift-version 5 \
     -O \
     -target "$TARGET" \
     -o "$BIN" \
-    Sources/Nadiktovka/*.swift
+    "${SOURCES[@]}"
 
 echo "==> Иконка"
 swift Tools/MakeIcon.swift build/AppIcon.iconset >/dev/null
