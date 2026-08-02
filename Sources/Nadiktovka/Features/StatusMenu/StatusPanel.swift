@@ -77,6 +77,29 @@ final class StatusPanelController {
         let root = StatusPanelView(model: model) { [weak self] in self?.close() }
         let hosting = NSHostingView(rootView: root)
         hosting.sizingOptions = [.intrinsicContentSize]
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+
+        // Настоящее стекло панели даёт NSVisualEffectView в режиме
+        // `.behindWindow`: он размывает рабочий стол и окна ПОД панелью.
+        // SwiftUI-стекло (`glassEffect`) работает только внутри своего окна —
+        // у прозрачной панели за ним пусто, и получался чёрный прямоугольник.
+        // `.popover` — тот же материал, на котором сделан Пункт управления.
+        let glass = NSVisualEffectView()
+        glass.material = .popover
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.wantsLayer = true
+        glass.layer?.cornerRadius = 16
+        glass.layer?.cornerCurve = .continuous
+        glass.layer?.masksToBounds = true
+
+        glass.addSubview(hosting)
+        NSLayoutConstraint.activate([
+            hosting.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: glass.topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: glass.bottomAnchor)
+        ])
 
         let panel = KeyablePanel(
             contentRect: NSRect(origin: .zero, size: NSSize(width: Self.size.width, height: 320)),
@@ -84,7 +107,7 @@ final class StatusPanelController {
             backing: .buffered,
             defer: false
         )
-        panel.contentView = hosting
+        panel.contentView = glass
         panel.isOpaque = false
         panel.backgroundColor = .clear
         // Тень и кромку рисует стекло содержимого.
@@ -230,11 +253,13 @@ private struct StatusPanelView: View {
         }
         .padding(14)
         .frame(width: 320)
-        .background {
+        // Стекло держит окно (NSVisualEffectView за этим видом), здесь остаётся
+        // только кромка: тонкая светлая обводка по скруглению панели.
+        .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
+                .strokeBorder(Palette.rimGlass, lineWidth: 1)
+                .allowsHitTesting(false)
+        )
     }
 
     // MARK: Шапка
@@ -242,9 +267,11 @@ private struct StatusPanelView: View {
     private var header: some View {
         HStack(spacing: 10) {
             ZStack {
+                // Внутри панели стекло уже есть — своё поверх него мутит
+                // картинку. Кружок держится заливкой и кромкой.
                 Circle()
-                    .fill(.clear)
-                    .glassEffect(.regular, in: Circle())
+                    .fill(Palette.surfaceTile)
+                    .overlay(Circle().strokeBorder(Palette.rimGlass, lineWidth: 1))
                 Image(systemName: "mic.fill")
                     .font(.system(size: 14, weight: .medium))
             }
