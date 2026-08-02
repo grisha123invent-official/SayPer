@@ -253,7 +253,11 @@ private struct StatusPanelView: View {
 
             controls
             usage
+
+            // Кнопки — отдельная зона: их нажимают, чтобы уйти из панели,
+            // и от переключателей выше их отделяет дополнительный воздух.
             footer
+                .padding(.top, 4)
         }
         .padding(14)
         .frame(width: 320)
