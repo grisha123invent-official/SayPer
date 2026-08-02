@@ -83,15 +83,24 @@ final class StatusPanelController {
         // `.behindWindow`: он размывает рабочий стол и окна ПОД панелью.
         // SwiftUI-стекло (`glassEffect`) работает только внутри своего окна —
         // у прозрачной панели за ним пусто, и получался чёрный прямоугольник.
-        // `.popover` — тот же материал, на котором сделан Пункт управления.
+        //
+        // Материал `.sidebar` — самый прозрачный из пригодных: сквозь него
+        // видно, что лежит под панелью. `.popover` и `.hudWindow` плотные,
+        // в тёмной теме они читаются как чёрный блок, а не как стекло.
         let glass = NSVisualEffectView()
-        glass.material = .popover
+        glass.material = .sidebar
         glass.blendingMode = .behindWindow
         glass.state = .active
+        glass.isEmphasized = true
         glass.wantsLayer = true
         glass.layer?.cornerRadius = 16
         glass.layer?.cornerCurve = .continuous
         glass.layer?.masksToBounds = true
+
+        // Хостинг обязан быть прозрачным: непрозрачный слой SwiftUI закрыл бы
+        // стекло собой, и весь эффект пропал бы независимо от материала.
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
 
         glass.addSubview(hosting)
         NSLayoutConstraint.activate([
@@ -108,6 +117,11 @@ final class StatusPanelController {
             defer: false
         )
         panel.contentView = glass
+        // Панель всегда в светлом виде: системные материалы показывают то,
+        // что под ними, и в тёмной теме стекло получается тёмным. Заказчику
+        // нужно беловатое матовое стекло, как на референсе Apple, поэтому
+        // тема панели фиксируется, а не следует за системной.
+        panel.appearance = NSAppearance(named: .aqua)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         // Тень и кромку рисует стекло содержимого.
