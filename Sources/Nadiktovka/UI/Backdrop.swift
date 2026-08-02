@@ -53,20 +53,26 @@ struct AmbientGlow: View {
         )
         let radius = min(size.width, size.height) * 0.56 * scale
 
+        // Цвета орба берутся из выбранного акцента: фон меняется вместе
+        // с переключателями и вкладками, а не живёт своей жизнью.
+        let theme = Settings.shared.accentTheme
+        let core = theme.orbCore
+        let halo = theme.orbHalo
+
         let body: Gradient
         if dark {
             body = Gradient(stops: [
                 .init(color: Color(red: 0.01, green: 0.01, blue: 0.03), location: 0.0),
-                .init(color: Color(red: 0.30, green: 0.22, blue: 0.62), location: 0.32),
-                .init(color: Color(red: 0.76, green: 0.70, blue: 0.98), location: 0.52),
-                .init(color: Color(red: 0.42, green: 0.34, blue: 0.78).opacity(0.42), location: 0.72),
+                .init(color: Color(red: core.r, green: core.g, blue: core.b), location: 0.32),
+                .init(color: Color(red: halo.r, green: halo.g, blue: halo.b), location: 0.52),
+                .init(color: Color(red: core.r, green: core.g, blue: core.b).opacity(0.42), location: 0.72),
                 .init(color: .clear, location: 1.0)
             ])
         } else {
             body = Gradient(stops: [
                 .init(color: .white, location: 0.0),
-                .init(color: Color(red: 0.78, green: 0.72, blue: 0.99), location: 0.42),
-                .init(color: Color(red: 0.58, green: 0.50, blue: 0.92).opacity(0.55), location: 0.68),
+                .init(color: Color(red: halo.r, green: halo.g, blue: halo.b), location: 0.42),
+                .init(color: Color(red: core.r, green: core.g, blue: core.b).opacity(0.55), location: 0.68),
                 .init(color: .clear, location: 1.0)
             ])
         }
@@ -152,19 +158,19 @@ struct PanelGlow: View {
         let breatheTop = 1 + 0.10 * sin(t * 2 * .pi / 11)
         let breatheBottom = 1 + 0.10 * sin(t * 2 * .pi / 11 + .pi)
 
+        let theme = Settings.shared.accentTheme
+
         blob(&context, size: size,
              center: CGPoint(x: size.width * 0.30, y: size.height * 0.06),
              radius: size.width * 0.85 * breatheTop,
-             color: dark ? Color(red: 0.42, green: 0.34, blue: 0.86)
-                         : Color(red: 0.62, green: 0.58, blue: 0.95),
-             alpha: dark ? 0.40 : 0.34)
+             color: theme.glowTop,
+             alpha: dark ? 0.40 : 0.30)
 
         blob(&context, size: size,
              center: CGPoint(x: size.width * 0.74, y: size.height * 1.02),
              radius: size.width * 0.80 * breatheBottom,
-             color: dark ? Color(red: 0.30, green: 0.38, blue: 0.88)
-                         : Color(red: 0.58, green: 0.68, blue: 0.98),
-             alpha: dark ? 0.34 : 0.30)
+             color: theme.glowBottom,
+             alpha: dark ? 0.34 : 0.26)
     }
 
     private func blob(_ context: inout GraphicsContext, size: CGSize,

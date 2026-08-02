@@ -133,7 +133,7 @@ struct UsageBlock: View {
         }
         .buttonStyle(.plain)
         .font(.subheadline)
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(Palette.accent)
         .padding(.top, Palette.spaceSm)
         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -203,7 +203,7 @@ struct UsageBlock: View {
                     Capsule(style: .continuous)
                         .fill(Self.meterTrack)
                     Capsule(style: .continuous)
-                        .fill(Color.accentColor)
+                        .fill(Palette.accent)
                         .frame(width: geometry.size.width * Self.share(row.cost, of: maxCost))
                 }
             }
@@ -302,5 +302,5 @@ struct UsageBlock: View {
     }()
 
     /// Дорожка полосы-меры: тот же акцент, приглушённый до подложки.
-    private static let meterTrack = Color.accentColor.opacity(0.16)
+    private static let meterTrack = Palette.accent.opacity(0.16)
 }

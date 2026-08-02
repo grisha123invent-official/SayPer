@@ -9,12 +9,14 @@ struct SettingsSectionSystem: View {
     @ObservedObject var model: SettingsModel
 
     @FocusState private var keyFieldFocused: Bool
+    @State private var accent = Settings.shared.accentTheme
 
     var body: some View {
         SectionScaffold {
             UsageBlock()
             openAI
             keyboardAccess
+            appearance
             system
         }
     }
@@ -131,6 +133,53 @@ struct SettingsSectionSystem: View {
                     NotificationCenter.default.post(name: .showDiagnostics, object: nil)
                 }
             }
+        }
+    }
+
+    /// Выбор акцента. Иконку приложения им не поменять — она в подписанном
+    /// бандле, и запись туда сломала бы подпись, к которой привязаны
+    /// разрешения. Зато акцент видно при каждом открытии окна.
+    private var appearance: some View {
+        GlassCard("Оформление") {
+            SettingRow(
+                "Цвет",
+                subtitle: "Переключатели, активная вкладка, свечение фона и индикатор записи"
+            ) {
+                HStack(spacing: Palette.spaceXs) {
+                    ForEach(AccentTheme.allCases) { theme in
+                        AccentSwatch(theme: theme, isSelected: accent == theme) {
+                            accent = theme
+                            Settings.shared.accentTheme = theme
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private struct AccentSwatch: View {
+        let theme: AccentTheme
+        let isSelected: Bool
+        let action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                Circle()
+                    .fill(theme.accent)
+                    .frame(width: 22, height: 22)
+                    // Выбранный обведён кольцом с зазором, а не галочкой:
+                    // галочка на цветном кружке читается хуже кольца.
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.primary.opacity(isSelected ? 0.9 : 0), lineWidth: 2)
+                            .padding(-4)
+                    )
+                    .contentShape(Circle().inset(by: -4))
+            }
+            .buttonStyle(.plain)
+            .help(Text(theme.title))
+            .accessibilityLabel(theme.title)
+            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         }
     }
 

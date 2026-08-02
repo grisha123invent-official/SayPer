@@ -29,40 +29,51 @@ func render(size: CGFloat) -> Data? {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 
-    // Подложка: скруглённый квадрат в пропорциях macOS.
+    // Подложка: скруглённый квадрат в пропорциях macOS. Чёрная, а не цветная:
+    // фиолетово-синий градиент — самый заезженный фон у AI-приложений,
+    // на чёрном знак читается резче и не сливается с соседями в Finder.
     let inset = size * 0.085
     let body = NSRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2)
     let radius = body.width * 0.2237
     let shape = NSBezierPath(roundedRect: body, xRadius: radius, yRadius: radius)
 
     let gradient = NSGradient(colors: [
-        NSColor(calibratedRed: 0.42, green: 0.31, blue: 0.93, alpha: 1),
-        NSColor(calibratedRed: 0.16, green: 0.44, blue: 0.94, alpha: 1)
+        NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.12, alpha: 1),
+        NSColor(calibratedRed: 0.0, green: 0.0, blue: 0.0, alpha: 1)
     ])
     gradient?.draw(in: shape, angle: -90)
 
-    // Знак: слева вертикальные штрихи речи, справа они ложатся строками
-    // текста. Микрофона нет намеренно — он про начало пути, а иконка
-    // должна показывать превращение: сказал, распозналось, вставилось.
+    // Знак: два штриха речи слева, две строки текста справа. Минимум
+    // элементов — чтобы в шестнадцати пикселях строки не слипались в пятно.
     NSColor.white.setFill()
 
-    let barWidth = size * 0.052
-    let barGap = size * 0.045
-    let barHeights: [CGFloat] = [0.20, 0.38, 0.28, 0.46]
+    let weight = size * 0.066
+    let barGap = weight * 0.85
+    let barHeights: [CGFloat] = [0.26, 0.44]
+    let lineWidths: [CGFloat] = [0.26, 0.19]
+    let bridge = size * 0.055
+
+    let barsWidth = CGFloat(barHeights.count) * weight + CGFloat(barHeights.count - 1) * barGap
+    let total = barsWidth + bridge + (lineWidths.max() ?? 0) * size
+    let startX = size * 0.5 - total / 2
+
     for (index, factor) in barHeights.enumerated() {
-        let x = size * 0.20 + CGFloat(index) * (barWidth + barGap)
+        let x = startX + CGFloat(index) * (weight + barGap)
         let height = size * factor
-        let rect = NSRect(x: x, y: size * 0.5 - height / 2, width: barWidth, height: height)
-        NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
+        NSBezierPath(
+            roundedRect: NSRect(x: x, y: size * 0.5 - height / 2, width: weight, height: height),
+            xRadius: weight / 2, yRadius: weight / 2
+        ).fill()
     }
 
-    let lineHeight = size * 0.052
-    let lineGap = size * 0.045
-    let lineWidths: [CGFloat] = [0.25, 0.19, 0.23]
+    let linesX = startX + barsWidth + bridge
+    let block = CGFloat(lineWidths.count) * weight + CGFloat(lineWidths.count - 1) * barGap
     for (index, factor) in lineWidths.enumerated() {
-        let y = size * 0.5 + (lineHeight + lineGap) - CGFloat(index) * (lineHeight + lineGap) - lineHeight / 2
-        let rect = NSRect(x: size * 0.55, y: y, width: size * factor, height: lineHeight)
-        NSBezierPath(roundedRect: rect, xRadius: lineHeight / 2, yRadius: lineHeight / 2).fill()
+        let y = size * 0.5 + block / 2 - CGFloat(index) * (weight + barGap) - weight
+        NSBezierPath(
+            roundedRect: NSRect(x: linesX, y: y, width: size * factor, height: weight),
+            xRadius: weight / 2, yRadius: weight / 2
+        ).fill()
     }
 
     NSGraphicsContext.restoreGraphicsState()

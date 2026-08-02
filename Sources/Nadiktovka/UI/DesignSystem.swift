@@ -403,7 +403,7 @@ struct GlassSwitchStyle: ToggleStyle {
                 // Дорожка включённого — яркий акцент: он и есть цвет контрола,
                 // а стеклянная линза сверху его преломляет.
                 .fill(configuration.isOn
-                      ? AnyShapeStyle(Color.accentColor)
+                      ? AnyShapeStyle(Palette.accent)
                       : AnyShapeStyle(Color.white.opacity(0.10)))
                 .frame(width: trackWidth, height: trackHeight)
                 // Кромка дорожки: без неё выключенный переключатель
@@ -764,7 +764,7 @@ struct CapsuleButtonStyle: ButtonStyle {
         @ViewBuilder
         private var background: some View {
             ZStack {
-                Capsule(style: .continuous).fill(isAccent ? Color.accentColor : Palette.surfaceTile)
+                Capsule(style: .continuous).fill(isAccent ? Palette.accent : Palette.surfaceTile)
                 // Наведение — на уровень плотнее, нажатие — ещё на уровень. Без сдвига.
                 if isEnabled, isHovered || configuration.isPressed {
                     Capsule(style: .continuous)

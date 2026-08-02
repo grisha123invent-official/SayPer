@@ -101,7 +101,7 @@ struct UsageChart: View {
                 let height = layout.height(for: point.value)
                 if height > 0 {
                     TopRoundedBar(cornerRadius: 4)
-                        .fill(Color.accentColor)
+                        .fill(Palette.accent)
                         .frame(width: layout.barWidth, height: height)
                         .brightness(hovered == index ? 0.06 : 0)
                         .offset(
