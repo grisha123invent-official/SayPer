@@ -107,69 +107,82 @@ struct SettingsTabStrip: View {
     private static let flow = Animation.smooth(duration: 0.42, extraBounce: 0)
 
     var body: some View {
-        GlassEffectContainer(spacing: 14) {
-            HStack(spacing: 2) {
-                ForEach(SettingsSection.allCases) { item in
-                    Segment(item: item, isSelected: model.section == item) {
-                        // Анимацию задаёт сама капсула. Оборачивать смену ещё и
-                        // в withAnimation нельзя: две анимации на одно изменение
-                        // дерутся между собой и дают рывок.
-                        model.section = item
-                        // Запоминается только то, куда человек перешёл сам. Открытия
-                        // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
-                        // при невыданном доступе запомненный раздел не переписывают.
-                        Settings.shared.lastSettingsSection = item
-                    }
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: TabFrames.self,
-                                value: [item: proxy.frame(in: .named("tabStrip"))]
-                            )
-                        }
-                    }
-                }
+        // Плашка — отдельный НИЖНИЙ слой ZStack, а не `.background` у ряда:
+        // стекло рисует себя выше содержимого подложки, и подписи вкладок
+        // оказывались под матовым слоем.
+        ZStack(alignment: .topLeading) {
+            GlassEffectContainer(spacing: 14) {
+                activeCapsule
             }
-            .coordinateSpace(name: "tabStrip")
-            .onPreferenceChange(TabFrames.self) { frames = $0 }
-            .background(alignment: .leading) {
-                if let frame = frames[model.section] {
-                    ActiveCapsule(namespace: glassSpace)
-                        .frame(width: frame.width, height: frame.height)
-                        // Капля: по дороге плашка вытягивается вдоль движения
-                        // и сплющивается поперёк, в конце упруго возвращается
-                        // в форму. Само перемещение — отдельной анимацией.
-                        .keyframeAnimator(
-                            initialValue: Morph(),
-                            trigger: model.section
-                        ) { view, morph in
-                            view.scaleEffect(x: morph.stretch, y: morph.squash, anchor: .center)
-                        } keyframes: { _ in
-                            KeyframeTrack(\.stretch) {
-                                CubicKeyframe(1.16, duration: 0.20)
-                                CubicKeyframe(0.97, duration: 0.14)
-                                CubicKeyframe(1.0, duration: 0.12)
-                            }
-                            KeyframeTrack(\.squash) {
-                                CubicKeyframe(0.84, duration: 0.20)
-                                CubicKeyframe(1.04, duration: 0.14)
-                                CubicKeyframe(1.0, duration: 0.12)
-                            }
-                        }
-                        .offset(x: frame.minX)
-                        // Перемещение покрывает все пути смены раздела:
-                        // клик, ⌘1…⌘5, открытие из меню статус-бара.
-                        .animation(Self.flow, value: model.section)
-                }
-            }
-            .padding(2)
-            .frame(height: Palette.tabCapsuleHeight)
-            // Отступ сверху: капсула не должна упираться в кнопки окна.
-            .padding(.top, Palette.tabStripTopInset)
+            segments
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Разделы настроек")
+    }
+
+    private var segments: some View {
+        HStack(spacing: 2) {
+            ForEach(SettingsSection.allCases) { item in
+                Segment(item: item, isSelected: model.section == item) {
+                    // Анимацию задаёт сама капсула. Оборачивать смену ещё и
+                    // в withAnimation нельзя: две анимации на одно изменение
+                    // дерутся между собой и дают рывок.
+                    model.section = item
+                    // Запоминается только то, куда человек перешёл сам. Открытия
+                    // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
+                    // при невыданном доступе запомненный раздел не переписывают.
+                    Settings.shared.lastSettingsSection = item
+                }
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: TabFrames.self,
+                            value: [item: proxy.frame(in: .named("tabStrip"))]
+                        )
+                    }
+                }
+            }
+        }
+        .coordinateSpace(name: "tabStrip")
+        .onPreferenceChange(TabFrames.self) { frames = $0 }
+        .padding(2)
+        .frame(height: Palette.tabCapsuleHeight)
+        .padding(.top, Palette.tabStripTopInset)
+    }
+
+    @ViewBuilder
+    private var activeCapsule: some View {
+        if let frame = frames[model.section] {
+            ActiveCapsule(namespace: glassSpace)
+                .frame(width: frame.width, height: frame.height)
+                // Капля: по дороге плашка вытягивается вдоль движения
+                // и сплющивается поперёк, в конце упруго возвращается
+                // в форму. Само перемещение — отдельной анимацией.
+                .keyframeAnimator(
+                    initialValue: Morph(),
+                    trigger: model.section
+                ) { view, morph in
+                    view.scaleEffect(x: morph.stretch, y: morph.squash, anchor: .center)
+                } keyframes: { _ in
+                    KeyframeTrack(\.stretch) {
+                        CubicKeyframe(1.16, duration: 0.20)
+                        CubicKeyframe(0.97, duration: 0.14)
+                        CubicKeyframe(1.0, duration: 0.12)
+                    }
+                    KeyframeTrack(\.squash) {
+                        CubicKeyframe(0.84, duration: 0.20)
+                        CubicKeyframe(1.04, duration: 0.14)
+                        CubicKeyframe(1.0, duration: 0.12)
+                    }
+                }
+                // Сдвиг учитывает поля ряда: плашка лежит в своём слое и
+                // о padding'ах соседа сама не знает.
+                .offset(x: frame.minX + 2, y: Palette.tabStripTopInset + 2)
+                // Перемещение покрывает все пути смены раздела:
+                // клик, ⌘1…⌘5, открытие из меню статус-бара.
+                .animation(Self.flow, value: model.section)
+        }
     }
 
     /// Активная вкладка: чистое стекло, без заливки и без подкраски.
