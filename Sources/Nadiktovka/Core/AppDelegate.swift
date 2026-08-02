@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusMenu = StatusMenuBuilder()
     /// Панель вместо системного списка. Ленивая: ей нужен `self` как источник действий.
     private lazy var statusPanel = StatusPanelController(actions: self)
+    /// Живёт только на время первого запуска, потом обнуляется.
+    private var onboarding: OnboardingWindowController?
 
     private var lastText: String?
     private var isBusy = false
@@ -115,6 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Task { @MainActor in
+            // Микрофон на старте спрашиваем только у тех, кто мастер уже прошёл.
+            // Иначе первое, что видит человек, — голый системный алерт без
+            // единого слова о том, что это за программа и зачем ей микрофон.
+            guard Settings.shared.onboardingCompleted else {
+                showOnboarding()
+                return
+            }
             _ = await AudioRecorder.requestMicrophoneAccess()
             checkFirstRun()
         }
@@ -127,6 +136,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recorder.cancel()
     }
 
+
+    /// Первый запуск: мастер вместо череды системных алертов.
+    @MainActor
+    private func showOnboarding() {
+        let controller = OnboardingWindowController()
+        // Держим ссылку, пока окно живо: контроллер владеет моделью с таймером,
+        // и без этого его выметет сборщик прямо на первом шаге.
+        onboarding = controller
+        controller.onFinish = { [weak self] in
+            guard let self else { return }
+            self.onboarding = nil
+            // Разрешения могли появиться прямо в мастере — перехват поднимется
+            // сам, но состояние в настройках надо перечитать.
+            self.settingsWindow.model.refreshPermissions()
+        }
+        controller.show()
+    }
 
     /// При первом запуске подсказываем, чего не хватает для работы.
     private func checkFirstRun() {
