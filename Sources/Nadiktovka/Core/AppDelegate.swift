@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Превращает события хоткея в команды записи — здесь живут режимы активации.
     private let gate = RecordingGate()
     private let statusMenu = StatusMenuBuilder()
+    /// Панель вместо системного списка. Ленивая: ей нужен `self` как источник действий.
+    private lazy var statusPanel = StatusPanelController(actions: self)
 
     private var lastText: String?
     private var isBusy = false
@@ -193,7 +195,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }()
 
         statusMenu.lastText = lastText
-        statusItem.menu = statusMenu.build()
+        // Меню не вешаем на statusItem: клик открывает свою панель, иначе
+        // системный список перехватит нажатие и панель не покажется.
+        button.target = self
+        button.action = #selector(toggleStatusPanel)
+        button.sendAction(on: [.leftMouseDown, .rightMouseDown])
+
+        statusPanel.refreshIfOpen()
+    }
+
+    /// Левый клик — панель, правый — короткое системное меню на случай,
+    /// если панель почему-то не открылась (запасной путь к выходу).
+    @objc private func toggleStatusPanel() {
+        guard let button = statusItem.button else { return }
+
+        if NSApp.currentEvent?.type == .rightMouseDown {
+            statusPanel.close()
+            statusItem.menu = statusMenu.build()
+            button.performClick(nil)
+            statusItem.menu = nil
+            return
+        }
+
+        statusPanel.toggle(from: button)
     }
 
     @objc private func openSettings() {
@@ -478,6 +502,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Реализация целиком, включая пункты, которых в меню пока нет: контракт
 /// заморожен, чтобы слайс «Меню» верстал пункты, не возвращаясь сюда.
+/// Панель просит у приложения ровно то же, что и меню, — отдельной реализации
+/// не нужно, протоколы совпадают по составу.
+extension AppDelegate: StatusPanelActions {}
+
 extension AppDelegate: StatusMenuActions {
     var menuStatusTitle: String {
         switch status {
