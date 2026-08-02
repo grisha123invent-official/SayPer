@@ -24,19 +24,27 @@ The app is signed but **not notarised by Apple** (notarisation needs a paid Deve
 
 ### One command, then everything just works
 
-Open Terminal and run this once on the downloaded file:
+1. Open **Terminal** (⌘Space, type "Terminal").
+2. Type this, **including the trailing space**, but don't press Enter yet:
+
+   ```
+   xattr -d com.apple.quarantine 
+   ```
+
+3. **Drag the downloaded file from Finder straight into the Terminal window.** Its full path appears by itself — it doesn't matter where the file is or what it's called. This is the point of dragging: if you downloaded twice, macOS named the second copy `SayPer-1.0-beta.1 2.dmg`, and typing that by hand is asking for trouble.
+4. Press **Enter**.
+
+Now open the image, drag SayPer into Applications and launch it — no warnings at all. Clearing the quarantine on the image clears it for the app inside too, so the security dialog never appears.
+
+Same for the zip: clear it first, then unzip. Unzipping first and clearing after also works, just point the command at the app instead.
+
+**Already dragged the app into Applications and got blocked?** Then clear it on the app itself — `-r` because an app is a folder:
 
 ```bash
-xattr -d com.apple.quarantine ~/Downloads/SayPer-*.dmg
+xattr -dr com.apple.quarantine /Applications/SayPer.app
 ```
 
-That's it. Open the image, drag SayPer into Applications, launch it — no warnings at all. Clearing the quarantine on the image also clears it for the app inside, so you never see the security dialog.
-
-For the zip, do the same and unzip afterwards:
-
-```bash
-xattr -d com.apple.quarantine ~/Downloads/SayPer-*.zip
-```
+**"No such xattr" in response?** That means there was no quarantine on that file — nothing to do, just open it.
 
 ### Without Terminal
 

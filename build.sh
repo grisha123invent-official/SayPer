@@ -117,16 +117,26 @@ if [ "${1:-}" = "dmg" ]; then
     hdiutil create -srcfolder "$ROOM" -volname "$APP_NAME" -fs HFS+ \
         -format UDRW -ov "$RW" >/dev/null
 
-    MOUNT="/Volumes/${APP_NAME}"
-    hdiutil detach "$MOUNT" >/dev/null 2>&1 || true
-    hdiutil attach "$RW" -readwrite -noverify -noautoopen >/dev/null
+    # Точку монтирования берём из ответа hdiutil, а не строим из имени тома:
+    # если том с таким именем уже подключён, система молча смонтирует новый
+    # как «SayPer 1», и раскладка уедет не в тот образ.
+    for old in /Volumes/"${APP_NAME}"*; do
+        [ -d "$old" ] && hdiutil detach "$old" -force >/dev/null 2>&1 || true
+    done
+    MOUNT="$(hdiutil attach "$RW" -readwrite -noverify -noautoopen \
+        | grep -o '/Volumes/.*' | tail -1)"
+    if [ -z "$MOUNT" ]; then
+        echo "Не удалось смонтировать образ" >&2
+        exit 1
+    fi
+    VOLUME="$(basename "$MOUNT")"
 
     echo "  раскладка окна"
     # Координаты повторяют Tools/MakeDMGBackground.swift — правятся вместе.
     # Finder считает от левого верхнего угла, фон рисуется от левого нижнего.
     osascript <<APPLESCRIPT >/dev/null
 tell application "Finder"
-    tell disk "${APP_NAME}"
+    tell disk "${VOLUME}"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
