@@ -6,6 +6,7 @@ struct SettingsSectionSystem: View {
     @ObservedObject var model: SettingsModel
 
     @FocusState private var keyFieldFocused: Bool
+    @State private var backdrop = Settings.shared.backdropScene
 
     var body: some View {
         SectionScaffold {
@@ -127,6 +128,15 @@ struct SettingsSectionSystem: View {
 
     private var system: some View {
         GlassCard("Система", separated: true) {
+            CardDivider()
+            SettingRow("Фон окна", subtitle: "Сцена за карточками, живёт медленно") {
+                SegmentedControl(selection: $backdrop, options: BackdropScene.allCases,
+                                 compact: true) { $0.title }
+            }
+            .onChange(of: backdrop) { _, newValue in
+                Settings.shared.backdropScene = newValue
+            }
+
             CardDivider()
             SwitchToggle("Запускать при входе в систему", isOn: $model.launchAtLogin)
 
