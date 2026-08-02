@@ -104,6 +104,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         center.addObserver(forName: .hotkeyRecordingEnded, object: nil, queue: .main) { [weak self] _ in
             self?.hotkeys.resume()
         }
+        // Диагностику зовут из раздела «Ключ и доступ»: сам раздел про
+        // AppDelegate ничего не знает и знать не должен.
+        center.addObserver(forName: .showDiagnostics, object: nil, queue: .main) { [weak self] _ in
+            self?.showDiagnostics()
+        }
 
         Task { @MainActor in
             _ = await AudioRecorder.requestMicrophoneAccess()

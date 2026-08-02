@@ -44,3 +44,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 }
+
+extension Notification.Name {
+    /// Просьба показать отчёт диагностики. Публикует раздел «Ключ и доступ»,
+    /// слушает `AppDelegate` — он единственный знает состояние перехвата.
+    static let showDiagnostics = Notification.Name("showDiagnostics")
+}

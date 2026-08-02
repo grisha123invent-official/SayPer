@@ -16,8 +16,7 @@ struct SettingsSectionSystem: View {
     }
 
     private var openAI: some View {
-        GlassCard("OpenAI", separated: true) {
-            CardDivider()
+        GlassCard("OpenAI") {
 
             HStack(spacing: Palette.spaceSm) {
                 Text("API-ключ")
@@ -26,8 +25,6 @@ struct SettingsSectionSystem: View {
                 keyField
             }
             .frame(minHeight: Palette.rowHeight)
-
-            CardDivider()
 
             HStack(spacing: Palette.spaceSm) {
                 CapsuleButton(
@@ -57,8 +54,6 @@ struct SettingsSectionSystem: View {
                 Spacer(minLength: 0)
             }
             .frame(minHeight: Palette.rowHeight)
-
-            CardDivider()
 
             // Единственная подсказка в разделе: про хранение ключа из контрола
             // не догадаешься, а это вопрос безопасности.
@@ -95,9 +90,7 @@ struct SettingsSectionSystem: View {
     }
 
     private var keyboardAccess: some View {
-        GlassCard("Доступ к клавиатуре", separated: true) {
-            CardDivider()
-
+        GlassCard("Доступ к клавиатуре") {
             HStack(spacing: Palette.spaceSm) {
                 HStack(spacing: 7) {
                     Image(systemName: model.accessibilityGranted
@@ -122,12 +115,23 @@ struct SettingsSectionSystem: View {
                 CapsuleButton("Открыть настройки доступа") { KeyboardAccess.request(model) }
             }
             .frame(minHeight: Palette.rowHeight)
+
+            // Диагностика переехала сюда из панели строки меню: нужна она
+            // только когда что-то не работает, а искать её будут рядом
+            // с разрешениями — здесь же видно их состояние.
+            SettingRow(
+                "Диагностика",
+                subtitle: "Состояние доступов, микрофона и ключа плюс путь к журналу"
+            ) {
+                CapsuleButton("Показать") {
+                    NotificationCenter.default.post(name: .showDiagnostics, object: nil)
+                }
+            }
         }
     }
 
     private var system: some View {
-        GlassCard("Система", separated: true) {
-            CardDivider()
+        GlassCard("Система") {
             SwitchToggle("Запускать при входе в систему", isOn: $model.launchAtLogin)
 
             // Текст ошибки появляется только тогда, когда ошибка есть.

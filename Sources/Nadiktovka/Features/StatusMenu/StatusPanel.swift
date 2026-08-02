@@ -246,13 +246,13 @@ private struct StatusPanelView: View {
             }
 
             header
-            usage
 
             if !model.history.isEmpty {
                 recent
             }
 
             controls
+            usage
             footer
         }
         .padding(14)
@@ -326,35 +326,36 @@ private struct StatusPanelView: View {
 
     // MARK: Расходы
 
+    /// Строка вместо трёх плиток: цифры за день смотрят из любопытства раз
+    /// в неделю, а места плитки занимали четверть панели. Клик ведёт
+    /// в раздел «Расходы», где та же статистика подробно.
     private var usage: some View {
         Button {
             model.actions?.menuOpenSettings(.usage)
             dismiss()
         } label: {
-            HStack(spacing: 8) {
-                tile(value: "\(model.todayCount)", caption: "записей")
-                tile(value: String(format: "%.0f", model.todayMinutes), caption: "минут")
-                tile(value: String(format: "$%.2f", model.todayCost), caption: "сегодня")
+            HStack(spacing: 6) {
+                Text("Сегодня")
+                    .foregroundStyle(.secondary)
+                Text(summary)
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
+            .font(.system(size: 11))
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private func tile(value: String, caption: String) -> some View {
-        VStack(spacing: 1) {
-            Text(value)
-                .font(.system(size: 15, weight: .semibold).monospacedDigit())
-            Text(caption)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.white.opacity(0.08))
-        )
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    private var summary: String {
+        let minutes = model.todayMinutes < 1 && model.todayMinutes > 0
+            ? "меньше минуты"
+            : "\(Int(model.todayMinutes.rounded())) мин"
+        return "\(model.todayCount) · \(minutes) · " + String(format: "$%.2f", model.todayCost)
     }
 
     // MARK: Последние расшифровки
@@ -482,10 +483,6 @@ private struct StatusPanelView: View {
         HStack(spacing: 8) {
             action("Настройки", symbol: "gearshape") {
                 model.actions?.menuOpenSettings(Settings.shared.lastSettingsSection)
-                dismiss()
-            }
-            action("Диагностика", symbol: "stethoscope") {
-                model.actions?.menuShowDiagnostics()
                 dismiss()
             }
             action("Выйти", symbol: "power") {
