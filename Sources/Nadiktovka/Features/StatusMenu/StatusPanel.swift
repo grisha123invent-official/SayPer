@@ -379,13 +379,17 @@ private struct StatusPanelView: View {
                 }
             }
             .padding(4)
-            // Данные лежат на своей матовой плашке: прямо на орбе строки
-            // расшифровок теряли контраст, кольцо проходило сквозь текст.
+            // Данные — спокойная плашка с обводкой, без стекла: сквозь стекло
+            // орб просвечивал прямо в строки и мешал их читать. Стекло здесь
+            // работает на кнопках, где нужна отзывчивость, а не на списке.
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.black.opacity(0.22))
+                    .fill(.black.opacity(0.30))
             )
-            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Palette.rimGlass, lineWidth: 1)
+            )
         }
     }
 
@@ -472,9 +476,12 @@ private struct StatusPanelView: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.black.opacity(0.22))
+                .fill(.black.opacity(0.30))
         )
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Palette.rimGlass, lineWidth: 1)
+        )
     }
 
     // MARK: Низ
@@ -504,11 +511,13 @@ private struct StatusPanelView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
+            // Кнопки — на стекле: они отзываются на курсор и должны читаться
+            // как поверхность, которую нажимают.
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.white.opacity(0.08))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.white.opacity(0.18))
             )
-            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .glassEffect(.clear.interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
     }
