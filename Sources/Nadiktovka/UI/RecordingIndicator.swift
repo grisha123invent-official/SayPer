@@ -252,9 +252,28 @@ private final class IndicatorModel: ObservableObject {
         case .recording:
             return hint ?? "Слушаю"
         case .transcribing:
-            return elapsed >= 2 ? "Расшифровываю \(Int(elapsed)) с" : "Расшифровываю"
+            return Self.waitingPhrase(elapsed)
         case .error(let message):
             return message
+        }
+    }
+
+    /// Что писать, пока идёт расшифровка.
+    ///
+    /// Секунды раньше стояли здесь ради одного: показать, что приложение
+    /// не зависло. Ту же работу делает сменяющаяся фраза, но она ещё и
+    /// успокаивает, а не подгоняет — на счётчик человек начинает смотреть.
+    /// Хвост лестницы намеренно перестаёт шутить: если ждём больше минуты,
+    /// уместнее сказать, что делать, чем бодриться.
+    private static func waitingPhrase(_ elapsed: TimeInterval) -> String {
+        switch elapsed {
+        case ..<4: return "Расшифровываю"
+        case ..<9: return "Уже скоро"
+        case ..<16: return "Ещё чуть-чуть"
+        case ..<26: return "Почти готово"
+        case ..<40: return "Ну почти-почти"
+        case ..<70: return "Задумался, но не завис"
+        default: return "Долго. Esc — отменить"
         }
     }
 

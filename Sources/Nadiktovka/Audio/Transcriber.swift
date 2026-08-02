@@ -3,15 +3,28 @@ import Foundation
 /// Клиент OpenAI: расшифровка через /v1/audio/transcriptions и необязательная
 /// чистка результата через /v1/chat/completions.
 enum Transcriber {
-    /// Своя сессия: у общей таймаут запроса 60 секунд, и на медленной сети
-    /// отправка записи в него не укладывается.
-    private static let session: URLSession = {
+    /// Долгая сессия для мелких запросов: проверка ключа.
+    ///
+    /// Расшифровка ею не пользуется намеренно — см. `upload(_:body:)`.
+    private static let session: URLSession = makeSession()
+
+    private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.default
+        // У сессии по умолчанию 60 секунд, и на медленной сети отправка записи
+        // в них не укладывается.
         config.timeoutIntervalForRequest = 90
         config.timeoutIntervalForResource = 240
         config.waitsForConnectivity = true
         return URLSession(configuration: config)
-    }()
+    }
+
+    /// Сколько ждём ответа, если по соединению не идёт ни байта.
+    ///
+    /// Меньше умолчания URLRequest в 60 секунд, но с запасом на долгую запись:
+    /// пока сервер расшифровывает, данные не идут вообще. Собственный таймаут
+    /// запроса обязателен — он перекрывает настройку сессии, и без него
+    /// та девяностосекундная настройка не значит ничего.
+    private static let requestTimeout: TimeInterval = 45
 
     enum TranscribeError: LocalizedError {
         case noAPIKey
@@ -92,6 +105,7 @@ enum Transcriber {
 
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
         request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
@@ -127,11 +141,15 @@ enum Transcriber {
 
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
-        let (data, response) = try await session.data(for: request)
+        // Своя сессия по той же причине, что и у отправки записи.
+        let clean = makeSession()
+        defer { clean.finishTasksAndInvalidate() }
+        let (data, response) = try await clean.data(for: request)
         try check(response: response, data: data)
 
         guard
@@ -145,15 +163,45 @@ enum Transcriber {
         return cleaned.isEmpty ? text : cleaned
     }
 
-    /// Отправка с одной повторной попыткой: обрыв связи или таймаут на первой
-    /// попытке — обычное дело, терять из-за него готовую запись обидно.
+    /// Отправка с повторными попытками. Обрыв связи или таймаут — обычное дело,
+    /// терять из-за них готовую запись обидно.
+    ///
+    /// Каждая попытка идёт по своей сессии, то есть по своему соединению,
+    /// и сессия сразу закрывается.
+    ///
+    /// Иначе вторая расшифровка подряд зависала ровно на минуту. В журнале
+    /// картина была однозначная: первая отправка после запуска или после
+    /// долгого простоя — полторы секунды, следующая через 20-40 секунд —
+    /// 60 секунд тишины, обрыв по таймауту и мгновенный успех на повторе.
+    /// Виновато переиспользование соединения: приложение живёт в фоне,
+    /// система его придерживает, и сокет из пула к моменту второй отправки
+    /// уже мёртв — а URLSession об этом не знает и пишет в пустоту до таймаута.
+    /// Ценой лишнего рукопожатия TLS, то есть четверти секунды, снимается
+    /// минута ожидания.
     private static func upload(_ request: URLRequest, body: Data) async throws -> (Data, URLResponse) {
-        do {
-            return try await session.upload(for: request, from: body)
-        } catch let error as URLError where isWorthRetrying(error) {
-            Log.write("Сеть подвела (\(error.code.rawValue)), повторяю отправку")
-            return try await session.upload(for: request, from: body)
+        var lastError: Error?
+
+        for attempt in 1...3 {
+            let session = makeSession()
+            defer { session.finishTasksAndInvalidate() }
+
+            let startedAt = Date()
+            do {
+                let result = try await session.upload(for: request, from: body)
+                if attempt > 1 {
+                    Log.write("Попытка \(attempt) удалась за "
+                              + String(format: "%.1f", Date().timeIntervalSince(startedAt)) + " с")
+                }
+                return result
+            } catch let error as URLError where isWorthRetrying(error) && attempt < 3 {
+                lastError = error
+                Log.write("Попытка \(attempt): сеть подвела (\(error.code.rawValue)) через "
+                          + String(format: "%.1f", Date().timeIntervalSince(startedAt))
+                          + " с, пробую заново")
+            }
         }
+
+        throw lastError ?? URLError(.unknown)
     }
 
     private static func isWorthRetrying(_ error: URLError) -> Bool {
