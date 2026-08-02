@@ -483,8 +483,23 @@ extension AppDelegate: StatusMenuActions {
 
     var isHotkeyActive: Bool { hotkeys.isActive }
 
+    var menuActivation: HotkeyActivation { gate.mode }
+
     func menuOpenSettings(_ section: SettingsSection) {
         settingsWindow.show(section)
+    }
+
+    func menuSetActivation(_ mode: HotkeyActivation) {
+        // Ключ `record.activation` — общий с `RecordingGate.reload()`; своего
+        // свойства в `Settings` для него нет, его заводит слайс «Нажал-нажал»
+        // в `Settings+Recording.swift`. Здесь пишем тем же типизированным
+        // хелпером, чтобы не расширять замороженный `Settings.swift`.
+        Settings.shared.set(mode.rawValue, forKey: "record.activation")
+        // Шлюз — единственный, кто знает про режимы: он перечитывает настройку
+        // и заодно сбрасывает состояние, чтобы смена на полуслове не залипла.
+        gate.reload()
+        indicator.setHint(gate.currentHint)
+        renderStatusItem()
     }
 
     func menuCopy(_ text: String) {

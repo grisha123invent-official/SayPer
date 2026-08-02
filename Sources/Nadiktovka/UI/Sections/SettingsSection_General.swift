@@ -13,35 +13,47 @@ struct SettingsSectionGeneral: View {
     }
 
     private var hotkey: some View {
-        GlassCard("Горячая клавиша") {
-            SettingRow("Зажимать") {
-                HotkeyRecorder(hotkey: $model.hotkey)
-                    .frame(width: 190, height: 26)
+        GlassCard("Горячая клавиша", separated: true) {
+            CardDivider()
+
+            // Подсказка про поле стала описанием под самим полем: отдельным
+            // блоком под разделителем она читалась как отдельная мысль,
+            // хотя объясняет ровно этот контрол (`ia.md` §3).
+            SettingRow(
+                "Зажимать",
+                subtitle: "Кликни и зажми сочетание. Левые и правые клавиши различаются"
+            ) {
+                HStack(spacing: Palette.spaceXs) {
+                    HotkeyRecorder(hotkey: $model.hotkey)
+                        .frame(width: 190, height: 28)
+
+                    // Сброс показывается, только когда есть что сбрасывать.
+                    // Держать его под курсором нельзя: афорданс, живущий
+                    // только в наведении, для клавиатуры не существует.
+                    if model.hotkey != .rightOptionOnly {
+                        Button {
+                            model.hotkey = .rightOptionOnly
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.system(size: 12))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Вернуть правый ⌥")
+                    }
+                }
             }
-
-            HStack {
-                Spacer()
-                Button("Сбросить на правый ⌥") { model.hotkey = .rightOptionOnly }
-                    .buttonStyle(.link)
-                    .font(.caption)
-            }
-
-            Hint("Кликни по полю и зажми любое сочетание — хоть один модификатор, "
-                 + "хоть ⌃⌥D. Левые и правые клавиши различаются.")
-
-            Hint(model.hotkey.keyCode == nil
-                 ? "Нажатая во время удержания обычная клавиша отменяет запись, "
-                   + "так что привычные шорткаты не ломаются."
-                 : "Пока сочетание назначено, эта клавиша не печатается "
-                   + "в других приложениях.")
-
-            Hint("Esc прерывает и запись, и ожидание расшифровки.")
         }
     }
 
     private var duringRecording: some View {
-        GlassCard("Во время записи") {
-            SwitchToggle("Показывать индикатор записи", isOn: $model.showIndicator)
+        GlassCard("Во время записи", separated: true) {
+            CardDivider()
+            SwitchToggle("Показывать индикатор", isOn: $model.showIndicator)
+            CardDivider()
             SwitchToggle("Звуковые сигналы", isOn: $model.playSounds)
         }
     }

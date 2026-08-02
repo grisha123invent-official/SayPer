@@ -1,53 +1,44 @@
+import AppKit
 import SwiftUI
 
-/// Корень окна настроек: полоса разделов сверху, панель раздела под ней.
+/// Панель раздела: подложка L2, баннер доступа и сам раздел.
 ///
-/// Навигация — горизонтальные вкладки, а не боковой список: разделов пять,
-/// иерархии нет, а окно должно оставаться узким (`design/ia.md`).
-/// Здесь только рабочий каркас; стеклянную капсулу в титлбаре делает
-/// слайс «Оформление».
+/// Полосы вкладок здесь нет намеренно — она живёт в титлбаре
+/// (`SettingsTabStrip` внутри `NSTitlebarAccessoryViewController`, см. `ia.md` §1),
+/// а этот вид отвечает только за содержимое под ней.
 struct SettingsRootView: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
         VStack(spacing: 0) {
-            tabs
-            Divider()
-            section
-        }
-        .onAppear { model.refreshPermissions() }
-    }
+            // Волосок между полосой разделов и контентом: без него подложка
+            // панели в светлой теме сливается с материалом титлбара.
+            Rectangle()
+                .fill(Palette.hairline)
+                .frame(height: 1)
 
-    private var tabs: some View {
-        HStack(spacing: Palette.space2xs) {
-            ForEach(SettingsSection.allCases) { item in
-                Button {
-                    model.section = item
-                } label: {
-                    HStack(spacing: Palette.space2xs + 2) {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 15))
-                            .symbolRenderingMode(.hierarchical)
-                        Text(item.title)
-                            .font(.system(size: 11, weight: model.section == item ? .medium : .regular))
-                    }
-                    .foregroundStyle(model.section == item ? Color.primary : Color.secondary)
-                    .frame(minWidth: 84)
-                    .padding(.horizontal, Palette.spaceSm)
-                    .frame(height: 32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(model.section == item ? Palette.surfaceTile : Color.clear)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            VStack(spacing: 0) {
+                if !model.accessibilityGranted {
+                    AccessBanner { KeyboardAccess.request(model) }
+                        .frame(maxWidth: Palette.contentWidth)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Palette.spaceLg)
+                        .padding(.top, Palette.spaceLg)
+                        // 4 + 20 у панели = отбивка 24 до первой карточки.
+                        .padding(.bottom, Palette.space2xs)
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut(KeyEquivalent(item.shortcut), modifiers: .command)
-                .help(item.title)
+
+                section
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // L2: подложка панели раздела. Почти непрозрачна — читаемый текст
+            // никогда не лежит на стекле шасси напрямую (`tokens.md` §1).
+            .background(VisualEffectBackground(material: .contentBackground))
         }
-        .padding(.horizontal, Palette.spaceLg)
-        .frame(height: 44)
+        // Пока доступа нет, главное действие на экране — «Выдать доступ»,
+        // поэтому акцентные кнопки внутри карточек гаснут (П6).
+        .environment(\.accentActionsMuted, !model.accessibilityGranted)
+        .onAppear { model.refreshPermissions() }
     }
 
     @ViewBuilder
@@ -67,23 +58,100 @@ struct SettingsRootView: View {
     }
 }
 
-/// Заглушка раздела, который ещё не сделан.
-struct SectionPlaceholder: View {
-    private let symbol: String
+/// Запрос доступа к клавиатуре: одно действие на два вызова — баннер и карточка
+/// в разделе «Ключ и доступ». Разводить их по разным реализациям нельзя: человек
+/// нажмёт то, что ближе, и обязан получить один и тот же результат.
+enum KeyboardAccess {
+    private static let privacyPane =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
-    init(symbol: String) {
-        self.symbol = symbol
+    static func request(_ model: SettingsModel) {
+        HotkeyMonitor.requestTrust()
+        if let url = URL(string: privacyPane) {
+            NSWorkspace.shared.open(url)
+        }
+        // Разрешение выдают в системном окне: к моменту возврата в приложение
+        // состояние уже другое, и его надо перечитать.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            model.refreshPermissions()
+        }
     }
+}
+
+/// Полоса разделов: стеклянная капсула с пятью сегментами (`components.md` §6).
+///
+/// Кладётся в титлбар аксессуаром, поэтому знает только про модель и ничего —
+/// про окно. ⌘1…⌘5 вешает `SettingsWindowController`: аксессуар титлбара не
+/// участвует в разборе `performKeyEquivalent` у `contentView`, и шорткаты SwiftUI
+/// отсюда до окна не доходят.
+struct SettingsTabStrip: View {
+    @ObservedObject var model: SettingsModel
 
     var body: some View {
-        VStack(spacing: Palette.spaceSm) {
-            Image(systemName: symbol)
-                .font(.system(size: 28))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
-            Text("Раздел в работе")
-                .foregroundStyle(.secondary)
+        HStack(spacing: 2) {
+            ForEach(SettingsSection.allCases) { item in
+                Segment(item: item, isSelected: model.section == item) {
+                    model.section = item
+                }
+            }
         }
+        .padding(2)
+        .frame(height: Palette.tabCapsuleHeight)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Palette.surfaceTabTrack)
+        )
+        // Блик по верхней кромке — капсула парит над шасси (П4).
+        .overlay(
+            Capsule(style: .continuous)
+                .fill(Palette.specular)
+                .allowsHitTesting(false)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Palette.rimGlass, lineWidth: 1)
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Разделы настроек")
+    }
+
+    private struct Segment: View {
+        let item: SettingsSection
+        let isSelected: Bool
+        let action: () -> Void
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 6) {
+                    Image(systemName: item.symbol)
+                        .font(.system(size: 15))
+                        .symbolRenderingMode(.hierarchical)
+                    Text(item.title)
+                        .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .padding(.horizontal, Palette.spaceSm)
+                .frame(minWidth: 84, maxHeight: .infinity)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(fill)
+                )
+                .contentShape(Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(Text(verbatim: "\(item.title) (⌘\(item.shortcut))"))
+            .animation(.easeOut(duration: Palette.durHover), value: isHovered)
+            .onHover { isHovered = $0 }
+            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        }
+
+        private var fill: Color {
+            if isSelected { return Palette.surfaceTabActive }
+            return isHovered ? Palette.surfaceRowHover : .clear
+        }
     }
 }

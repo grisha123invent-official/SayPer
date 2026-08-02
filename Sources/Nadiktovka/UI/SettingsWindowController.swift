@@ -1,10 +1,26 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// Обёртка над NSWindow, чтобы окно жило независимо от меню.
-final class SettingsWindowController {
+///
+/// Слои материалов — строго по `tokens.md` §1:
+/// L0 — шасси окна, `.windowBackground` / `.behindWindow`;
+/// L1 — полоса разделов в титлбаре, `.headerView` / `.withinWindow`;
+/// L2 — подложка панели раздела, `.contentBackground` / `.withinWindow` (в корневом виде).
+/// Прежний `.underWindowBackground` — самый прозрачный материал системы, из-за него
+/// фон «пропадал» и текст просвечивал насквозь.
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     let model = SettingsModel()
+
+    /// ⌘1…⌘5. Через `keyboardShortcut` их не повесить: полоса разделов живёт
+    /// в титлбаре, а `performKeyEquivalent` окна обходит только `contentView`.
+    private var shortcutMonitor: Any?
+    private var sectionObserver: AnyCancellable?
+
+    private static let size = NSSize(width: 740, height: 540)
+    private static let minSize = NSSize(width: 700, height: 480)
 
     func show() {
         show(defaultSection())
@@ -15,51 +31,128 @@ final class SettingsWindowController {
         model.refreshPermissions()
         model.section = section
 
-        if let window {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
-
-        let size = NSSize(width: 820, height: 486)
-        let hosting = NSHostingController(rootView: SettingsRootView(model: model))
-
-        // Стеклянная подложка кладётся в contentView окна — иначе окно
-        // остаётся просто прозрачным и фон «пропадает».
-        let glass = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-        glass.material = .underWindowBackground
-        glass.blendingMode = .behindWindow
-        glass.state = .active
-        glass.autoresizingMask = [.width, .height]
-
-        hosting.view.frame = glass.bounds
-        hosting.view.autoresizingMask = [.width, .height]
-        glass.addSubview(hosting.view)
-
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = glass
-        window.title = "Надиктовка — настройки"
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-        window.backgroundColor = .clear
-        window.isReleasedWhenClosed = false
-        window.center()
-        self.window = window
-
+        let window = self.window ?? makeWindow()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// Пока нечем работать — открываем там, где это чинится.
+    // MARK: - Окно
+
+    private func makeWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Self.size),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+
+        // L0 — шасси. Стекло глушит рабочий стол до фона-шума, но само по себе
+        // подложкой под текст не служит: текст лежит на L2 внутри корневого вида.
+        let chassis = NSVisualEffectView()
+        chassis.material = .windowBackground
+        chassis.blendingMode = .behindWindow
+        chassis.state = .followsWindowActiveState
+        window.contentView = chassis
+
+        let hosting = NSHostingView(rootView: SettingsRootView(model: model))
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        chassis.addSubview(hosting)
+
+        // `contentLayoutGuide` уже учитывает титлбар вместе с аксессуаром,
+        // поэтому панель раздела встаёт ровно под полосу вкладок.
+        let layoutGuide = window.contentLayoutGuide as? NSLayoutGuide
+        NSLayoutConstraint.activate([
+            hosting.leadingAnchor.constraint(equalTo: chassis.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: chassis.trailingAnchor),
+            hosting.bottomAnchor.constraint(equalTo: chassis.bottomAnchor),
+            hosting.topAnchor.constraint(
+                equalTo: layoutGuide?.topAnchor ?? chassis.topAnchor
+            )
+        ])
+
+        window.addTitlebarAccessoryViewController(makeTabAccessory())
+
+        window.title = "Надиктовка"
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = .clear
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.contentMinSize = Self.minSize
+        // Ширина фиксирована по мокапу, тянется только высота: колонка контента
+        // всё равно упирается в 640, а широкое окно оставляет пустые поля.
+        window.contentMaxSize = NSSize(width: Self.size.width, height: .greatestFiniteMagnitude)
+        window.setContentSize(Self.size)
+        window.center()
+
+        self.window = window
+        installShortcutMonitor()
+        // Раздел запоминается сразу при переключении: окно закрывают крестиком,
+        // и ждать `windowWillClose` — значит терять состояние при выходе по ⌘Q.
+        sectionObserver = model.$section.sink { Settings.shared.lastSettingsSection = $0 }
+
+        return window
+    }
+
+    /// Полоса разделов: L1 в титлбаре, `layoutAttribute = .bottom`, высота 44.
+    private func makeTabAccessory() -> NSTitlebarAccessoryViewController {
+        let header = NSVisualEffectView(
+            frame: NSRect(x: 0, y: 0, width: Self.size.width, height: Palette.tabStripHeight)
+        )
+        header.material = .headerView
+        header.blendingMode = .withinWindow
+        header.state = .followsWindowActiveState
+        header.autoresizingMask = [.width]
+
+        let strip = NSHostingView(rootView: SettingsTabStrip(model: model))
+        strip.frame = header.bounds
+        strip.autoresizingMask = [.width, .height]
+        header.addSubview(strip)
+
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .bottom
+        accessory.view = header
+        return accessory
+    }
+
+    // MARK: - ⌘1…⌘5
+
+    private func installShortcutMonitor() {
+        guard shortcutMonitor == nil else { return }
+
+        shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window = self.window, window.isKeyWindow else { return event }
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else {
+                return event
+            }
+            // Пока в поле записывают сочетание, ⌘-клавиши принадлежат ему.
+            guard !(window.firstResponder is HotkeyRecorderView) else { return event }
+
+            guard let section = SettingsSection.allCases.first(where: {
+                String($0.shortcut) == event.charactersIgnoringModifiers
+            }) else { return event }
+
+            self.model.section = section
+            return nil
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        Settings.shared.lastSettingsSection = model.section
+    }
+
+    deinit {
+        if let shortcutMonitor {
+            NSEvent.removeMonitor(shortcutMonitor)
+        }
+    }
+
+    /// Пока нечем работать — открываем там, где это чинится; иначе возвращаем
+    /// человека туда, где он был в прошлый раз.
     private func defaultSection() -> SettingsSection {
         if Settings.shared.apiKey == nil || !HotkeyMonitor.isTrusted {
             return .system
         }
-        return model.section
+        return Settings.shared.lastSettingsSection
     }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Токены и общие кирпичики окна настроек.
@@ -23,11 +24,129 @@ enum Palette {
     /// Максимальная ширина колонки с карточками.
     static let contentWidth: CGFloat = 640
 
-    static var surfaceCard: Color { Color.primary.opacity(0.05) }
-    static var surfaceTile: Color { Color.primary.opacity(0.06) }
-    static var surfaceRowHover: Color { Color.primary.opacity(0.05) }
-    static var rimCard: Color { Color.primary.opacity(0.09) }
+    /// Высота строки настройки: одна строка / строка с описанием под ней.
+    static let rowHeight: CGFloat = 28
+    static let rowHeightWithSubtitle: CGFloat = 44
+    /// Высота строки списка истории.
+    static let historyRowHeight: CGFloat = 36
+    /// Высота кнопки-капсулы (`components.md` §7).
+    static let capsuleHeight: CGFloat = 26
+
+    /// Полоса разделов: высота аксессуара в титлбаре и высота самой капсулы
+    /// (`components.md` §6 — 32 внутри 44, по 6 сверху и снизу).
+    static let tabStripHeight: CGFloat = 44
+    static let tabCapsuleHeight: CGFloat = 32
+
+    /// Длительности движения (`tokens.md` §10).
+    static let durHover: Double = 0.12
+
+    // MARK: - Цвета
+
+    /// Значение зависит от темы: `tokens.md` задаёт для светлой и тёмной разные числа,
+    /// и `Color.primary.opacity(...)` их не воспроизводит — в тёмной теме подложка
+    /// должна быть *светлее* фона, а в светлой *темнее* или наоборот, в зависимости
+    /// от токена. `NSColor(name:dynamicProvider:)` пересчитывается сам при смене темы,
+    /// поэтому вызывающим ничего знать не нужно.
+    private static func themed(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+        })
+    }
+
+    private static func white(_ alpha: CGFloat) -> NSColor { NSColor(white: 1, alpha: alpha) }
+    private static func black(_ alpha: CGFloat) -> NSColor { NSColor(white: 0, alpha: alpha) }
+
+    /// Карточка-секция поверх подложки панели.
+    static var surfaceCard: Color { themed(light: white(0.70), dark: white(0.055)) }
+    /// Вложенная плитка статистики, поле словаря, обычная кнопка-капсула.
+    static var surfaceTile: Color { themed(light: black(0.045), dark: white(0.075)) }
+    /// Строка под курсором.
+    static var surfaceRowHover: Color { themed(light: black(0.05), dark: white(0.07)) }
+    /// Выбранная строка списка.
+    static var surfaceRowSelected: Color { Color(nsColor: .selectedContentBackgroundColor) }
+    /// Активный сегмент полосы разделов в титлбаре.
+    static var surfaceTabActive: Color { themed(light: white(0.85), dark: white(0.14)) }
+    /// Поля ввода — системная семантика, своих значений не заводим.
+    static var surfaceField: Color { Color(nsColor: .textBackgroundColor) }
+
+    /// Контур карточки-секции.
+    static var rimCard: Color { themed(light: black(0.08), dark: white(0.10)) }
+    /// Контур стеклянных поверхностей: HUD, капсула разделов.
+    static var rimGlass: Color { themed(light: white(0.55), dark: white(0.12)) }
+    /// Разделитель строк внутри карточки.
     static var hairline: Color { Color(nsColor: .separatorColor) }
+
+    /// Дорожка сегментированного контрола (значения из утверждённого мокапа).
+    static var segmentTrack: Color {
+        themed(light: NSColor(red: 0.47, green: 0.47, blue: 0.50, alpha: 0.13),
+               dark: NSColor(red: 0.47, green: 0.47, blue: 0.50, alpha: 0.24))
+    }
+    /// Выбранный сегмент.
+    static var segmentThumb: Color { themed(light: white(1.0), dark: white(0.20)) }
+
+    /// Дорожка капсулы разделов: L1 из мокапа. Материал полосы даёт
+    /// `NSVisualEffectView(.headerView)`, а капсула поверх него читается
+    /// как отдельная поверхность только с этой подложкой.
+    static var surfaceTabTrack: Color { themed(light: white(0.42), dark: white(0.06)) }
+
+    /// Обводка полей ввода: у `.separatorColor` в светлой теме контраст к белому
+    /// полю ниже порога, поле «растворяется» в карточке.
+    static var fieldBorder: Color { themed(light: black(0.16), dark: white(0.14)) }
+
+    /// Блик по верхней кромке — только у того, что парит (П4): HUD и капсула разделов.
+    static let specular = LinearGradient(
+        stops: [
+            .init(color: Color.white.opacity(0.20), location: 0),
+            .init(color: Color.white.opacity(0.04), location: 0.35),
+            .init(color: Color.white.opacity(0), location: 1)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+
+    /// Предупреждение: баннер отсутствия доступа, ошибка автозапуска.
+    static var warning: Color { Color(nsColor: .systemOrange) }
+    static var success: Color { Color(nsColor: .systemGreen) }
+
+    /// Подложка и обводка баннера. Прозрачность у оранжевого своя, не из
+    /// `surfaceTile`: баннер обязан читаться поверх любой подложки.
+    static var bannerFill: Color { Color(nsColor: .systemOrange).opacity(0.12) }
+    static var bannerRim: Color { Color(nsColor: .systemOrange).opacity(0.30) }
+}
+
+/// Материал `NSVisualEffectView` как подложка SwiftUI-вида.
+///
+/// Нужен там, где SwiftUI-материалы не дают нужного слоя: `.regularMaterial`
+/// не различает `.contentBackground` и `.headerView`, а именно на этой разнице
+/// держится правило «один слой размытия на глубину» (`tokens.md` §1).
+struct VisualEffectBackground: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blending: NSVisualEffectView.BlendingMode
+    let state: NSVisualEffectView.State
+
+    init(
+        material: NSVisualEffectView.Material,
+        blending: NSVisualEffectView.BlendingMode = .withinWindow,
+        state: NSVisualEffectView.State = .active
+    ) {
+        self.material = material
+        self.blending = blending
+        self.state = state
+    }
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blending
+        view.state = state
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = blending
+        view.state = state
+    }
 }
 
 /// Каркас панели раздела: одна колонка карточек, прокрутка и поля от краёв окна.
@@ -48,29 +167,47 @@ struct SectionScaffold<Content: View>: View {
             .padding(.horizontal, Palette.spaceLg)
             .padding(.vertical, Palette.spaceLg)
         }
+        // Подложку панели (L2) держит корень окна: у панели своего материала нет,
+        // иначе получится второй слой размытия на той же глубине (П2).
         .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
 /// Карточка-секция: заголовок внутри, первой строкой.
+///
+/// `separated: true` — карточка со строками, разделёнными волоском: собственные
+/// отступы между строками отключаются, отбивку задаёт сам `CardDivider`
+/// (по 8pt сверху и снизу), а разделители расставляет вызывающий — только там,
+/// где они нужны по мокапу.
 struct GlassCard<Content: View>: View {
     private let title: String
     private let accessory: AnyView?
+    private let separated: Bool
     private let content: Content
 
-    init(_ title: String, accessory: AnyView? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        _ title: String,
+        accessory: AnyView? = nil,
+        separated: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.accessory = accessory
+        self.separated = separated
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Palette.spaceSm) {
+        VStack(alignment: .leading, spacing: separated ? 0 : Palette.spaceSm) {
             HStack(spacing: Palette.spaceXs) {
                 Text(title).font(.headline)
                 Spacer(minLength: Palette.spaceXs)
                 accessory
             }
+            // Шапка карточки — 20pt, но контрол справа (сегменты периода)
+            // выше подписи, поэтому высота минимальная, а не жёсткая.
+            .frame(minHeight: 20)
 
             content
         }
@@ -100,19 +237,31 @@ struct SettingRow<Control: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Palette.spaceSm) {
-            VStack(alignment: .leading, spacing: Palette.space2xs) {
+        // Контрол выравнивается по центру своей строки, а описание уходит под
+        // всю строку целиком: если положить его в одну колонку с подписью,
+        // переключатель уезжает к середине блока и строки перестают держать
+        // общую линию (`components.md` §1).
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: Palette.spaceSm) {
                 Text(title)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    .font(.body)
+                Spacer(minLength: Palette.spaceSm)
+                control
             }
-            Spacer(minLength: Palette.spaceSm)
-            control
+            .frame(minHeight: Palette.rowHeight)
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: subtitle == nil ? Palette.rowHeight : Palette.rowHeightWithSubtitle,
+            alignment: .leading
+        )
     }
 }
 
@@ -178,5 +327,455 @@ struct StatTile: View {
             RoundedRectangle(cornerRadius: Palette.radiusTile, style: .continuous)
                 .fill(Palette.surfaceTile)
         )
+    }
+}
+
+/// Разделитель-волосок между строками карточки.
+///
+/// Инсет слева (`tokens.md` §2) — чтобы линия не резала карточку насквозь;
+/// отбивка сверху и снизу по 8pt. В списках, где строки уже имеют собственные
+/// поля, инсет складывается: строка истории отступает на 8, значит волосок —
+/// `CardDivider(inset: 20, spacing: 0)`.
+struct CardDivider: View {
+    private let inset: CGFloat
+    private let spacing: CGFloat
+
+    init(inset: CGFloat = Palette.spaceSm, spacing: CGFloat = Palette.spaceXs) {
+        self.inset = inset
+        self.spacing = spacing
+    }
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.hairline)
+            .frame(height: 1)
+            .padding(.leading, inset)
+            .padding(.vertical, spacing)
+    }
+}
+
+/// Сегментированный контрол: выбор из двух-трёх равноправных вариантов.
+///
+/// Обобщён по значению, подписи берутся замыканием — так один и тот же контрол
+/// обслуживает и режим активации («Удержание / Нажал-нажал»), и период
+/// в «Расходах» («7 дней / 30 дней / Всё время»), не заставляя перечисления
+/// подписываться под общий протокол.
+///
+/// ```swift
+/// SegmentedControl(selection: $mode) { $0.title }                 // по CaseIterable
+/// SegmentedControl(selection: $period, compact: true) { $0.title } // в шапке карточки
+/// ```
+struct SegmentedControl<Value: Hashable>: View {
+    @Binding private var selection: Value
+    private let options: [Value]
+    private let compact: Bool
+    private let title: (Value) -> String
+
+    init(
+        selection: Binding<Value>,
+        options: [Value],
+        compact: Bool = false,
+        title: @escaping (Value) -> String
+    ) {
+        self._selection = selection
+        self.options = options
+        self.compact = compact
+        self.title = title
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                Segment(
+                    title: title(option),
+                    isSelected: option == selection,
+                    compact: compact
+                ) {
+                    selection = option
+                }
+            }
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Palette.segmentTrack)
+        )
+    }
+
+    private struct Segment: View {
+        let title: String
+        let isSelected: Bool
+        let compact: Bool
+        let action: () -> Void
+
+        @State private var isHovered = false
+
+        var body: some View {
+            Button(action: action) {
+                Text(title)
+                    .font(compact ? .subheadline : .body)
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .padding(.horizontal, compact ? 9 : Palette.spaceSm)
+                    .padding(.vertical, compact ? 3 : Palette.space2xs)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(fill)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: Palette.durHover), value: isSelected)
+            .animation(.easeOut(duration: Palette.durHover), value: isHovered)
+            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        }
+
+        private var fill: Color {
+            if isSelected { return Palette.segmentThumb }
+            return isHovered ? Palette.surfaceRowHover : .clear
+        }
+    }
+}
+
+extension SegmentedControl where Value: CaseIterable {
+    /// Все варианты перечисления, в порядке объявления.
+    init(selection: Binding<Value>, compact: Bool = false, title: @escaping (Value) -> String) {
+        self.init(
+            selection: selection,
+            options: Array(Value.allCases),
+            compact: compact,
+            title: title
+        )
+    }
+}
+
+/// Пока в окне висит баннер «нет доступа к клавиатуре», главное действие на экране —
+/// «Выдать доступ», поэтому акцентные кнопки внутри карточек теряют заливку:
+/// контрастное пятно на экране ровно одно (П6). Раздел выставляет флаг один раз
+/// на всю панель — `.environment(\.accentActionsMuted, !model.hasKeyboardAccess)`.
+private struct AccentActionsMutedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var accentActionsMuted: Bool {
+        get { self[AccentActionsMutedKey.self] }
+        set { self[AccentActionsMutedKey.self] = newValue }
+    }
+}
+
+/// Кнопка-капсула: единый вид для действий в карточках и в баннере доступа.
+struct CapsuleButton: View {
+    enum Kind {
+        /// Обычная: заливка плитки, обводка карточки.
+        case normal
+        /// Основная, одна на экран (П6): акцентная заливка, текст выделения.
+        case accent
+    }
+
+    private let title: String
+    private let symbol: String?
+    private let kind: Kind
+    private let isLoading: Bool
+    private let action: () -> Void
+
+    init(
+        _ title: String,
+        kind: Kind = .normal,
+        symbol: String? = nil,
+        isLoading: Bool = false,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.kind = kind
+        self.symbol = symbol
+        self.isLoading = isLoading
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 14))
+                        .symbolRenderingMode(.hierarchical)
+                }
+                Text(title)
+            }
+        }
+        .buttonStyle(CapsuleButtonStyle(kind: kind))
+        // Пока идёт запрос, повторное нажатие не нужно — спиннер уже виден.
+        .disabled(isLoading)
+    }
+}
+
+/// Заливка, обводка и состояния кнопки-капсулы (`components.md` §7).
+struct CapsuleButtonStyle: ButtonStyle {
+    let kind: CapsuleButton.Kind
+
+    init(kind: CapsuleButton.Kind = .normal) {
+        self.kind = kind
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        Content(configuration: configuration, kind: kind)
+    }
+
+    /// Имя не `Body`: так называется associatedtype самого `ButtonStyle`.
+    private struct Content: View {
+        let configuration: ButtonStyleConfiguration
+        let kind: CapsuleButton.Kind
+
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accentActionsMuted) private var accentMuted
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .font(.body)
+                // На акценте — семантика системного выделения, а не жёсткий белый:
+                // при жёлтом системном акценте белый текст на нём нечитаем,
+                // а `alternateSelectedControlTextColor` там становится тёмным.
+                .foregroundStyle(isAccent
+                                 ? Color(nsColor: .alternateSelectedControlTextColor)
+                                 : Color.primary)
+                .padding(.horizontal, 14)
+                .frame(height: Palette.capsuleHeight)
+                .background(background)
+                .overlay(border)
+                .clipShape(Capsule(style: .continuous))
+                .contentShape(Capsule(style: .continuous))
+                .opacity(isEnabled ? 1 : 0.5)
+                .onHover { isHovered = $0 }
+                .animation(.easeOut(duration: Palette.durHover), value: isHovered)
+        }
+
+        /// Акцент гаснет, пока на экране висит баннер отсутствия доступа.
+        private var isAccent: Bool { kind == .accent && !accentMuted }
+
+        @ViewBuilder
+        private var background: some View {
+            ZStack {
+                Capsule(style: .continuous).fill(isAccent ? Color.accentColor : Palette.surfaceTile)
+                // Наведение — на уровень плотнее, нажатие — ещё на уровень. Без сдвига.
+                if isEnabled, isHovered || configuration.isPressed {
+                    Capsule(style: .continuous)
+                        .fill(scrim)
+                        .opacity(configuration.isPressed ? 1 : 0.55)
+                }
+            }
+        }
+
+        private var scrim: Color {
+            isAccent ? Color.black.opacity(0.14) : Palette.surfaceRowHover
+        }
+
+        @ViewBuilder
+        private var border: some View {
+            if !isAccent {
+                Capsule(style: .continuous).strokeBorder(Palette.rimCard, lineWidth: 1)
+            }
+        }
+    }
+}
+
+/// Баннер отсутствия доступа к клавиатуре.
+///
+/// Единственный элемент, который имеет право стоять выше карточек (`ia.md` §1.4):
+/// без доступа хоткей не сработает и всё остальное в окне бессмысленно. Показывается
+/// в любом разделе и живёт вне прокрутки — уехать из виду он не должен.
+struct AccessBanner: View {
+    private let action: () -> Void
+
+    init(action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    var body: some View {
+        HStack(spacing: Palette.spaceXs + 2) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.warning)
+            Text("Нет доступа к клавиатуре — хоткей не сработает")
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Palette.spaceSm)
+            CapsuleButton("Выдать доступ", kind: .accent, action: action)
+        }
+        .padding(.horizontal, Palette.spaceSm)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: Palette.radiusCard, style: .continuous)
+                .fill(Palette.bannerFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Palette.radiusCard, style: .continuous)
+                .strokeBorder(Palette.bannerRim, lineWidth: 1)
+        )
+        // Кнопка баннера — единственное акцентное пятно, пока доступа нет,
+        // поэтому сам баннер из общего приглушения выведен.
+        .environment(\.accentActionsMuted, false)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Строка списка истории (`components.md` §4).
+///
+/// Клик — скопировать, ⌥+клик — вставить снова, двойной клик — развернуть до трёх
+/// строк. Всё то же продублировано контекстным меню: афордансы, живущие только
+/// под курсором, запрещены.
+struct HistoryRow: View {
+    private let text: String
+    private let time: String
+    private let duration: String?
+    private let isSelected: Bool
+    private let onCopy: () -> Void
+    private let onInsertAgain: () -> Void
+
+    @State private var isHovered = false
+    @State private var isExpanded = false
+    @State private var didCopy = false
+
+    /// Ширина зоны меты фиксирована, иначе при наведении текст «переливается».
+    private let metaWidth: CGFloat = 56
+
+    init(
+        text: String,
+        time: String,
+        duration: String? = nil,
+        isSelected: Bool = false,
+        onCopy: @escaping () -> Void,
+        onInsertAgain: @escaping () -> Void
+    ) {
+        self.text = text
+        self.time = time
+        self.duration = duration
+        self.isSelected = isSelected
+        self.onCopy = onCopy
+        self.onInsertAgain = onInsertAgain
+    }
+
+    var body: some View {
+        HStack(spacing: Palette.spaceSm) {
+            Text(text)
+                .font(.body)
+                .lineLimit(isExpanded ? 3 : 1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let duration {
+                Text(duration)
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(isSelected ? selectedText : Color.secondary)
+            }
+
+            meta
+                .frame(width: metaWidth, alignment: .trailing)
+        }
+        .foregroundStyle(isSelected ? selectedText : Color.primary)
+        .padding(.horizontal, Palette.spaceXs)
+        .frame(minHeight: Palette.historyRowHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Palette.radiusRow, style: .continuous)
+                .fill(rowFill)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: Palette.radiusRow, style: .continuous))
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: Palette.durHover), value: isHovered)
+        // ⌥+клик перехватывается раньше обычного, иначе сработает копирование.
+        .highPriorityGesture(TapGesture().modifiers(.option).onEnded { onInsertAgain() })
+        .onTapGesture(count: 2) { isExpanded.toggle() }
+        .onTapGesture { copy() }
+        .contextMenu {
+            Button("Скопировать") { copy() }
+            Button("Вставить снова") { onInsertAgain() }
+            Button(isExpanded ? "Свернуть" : "Показать целиком") { isExpanded.toggle() }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(text), \(time)")
+    }
+
+    @ViewBuilder
+    private var meta: some View {
+        if didCopy {
+            // Молчаливый успех: галочка на 1,2 секунды вместо тоста.
+            Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color(nsColor: .systemGreen))
+        } else if isHovered {
+            HStack(spacing: Palette.space2xs) {
+                actionButton("doc.on.doc", help: "Скопировать", action: copy)
+                actionButton("arrow.down.doc", help: "Вставить снова", action: onInsertAgain)
+            }
+        } else {
+            Text(time)
+                .font(.subheadline)
+                .monospacedDigit()
+                .foregroundStyle(isSelected ? selectedText : Color.secondary)
+        }
+    }
+
+    private func actionButton(
+        _ symbol: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14))
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? selectedText : Color.secondary)
+        .help(help)
+    }
+
+    /// Текст на выбранной строке — системная семантика выделения: при светлом
+    /// системном акценте он не белый, и захардкоженный белый там пропадает.
+    private var selectedText: Color { Color(nsColor: .alternateSelectedControlTextColor) }
+
+    private var rowFill: Color {
+        if isSelected { return Palette.surfaceRowSelected }
+        return isHovered ? Palette.surfaceRowHover : .clear
+    }
+
+    private func copy() {
+        onCopy()
+        didCopy = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            didCopy = false
+        }
+    }
+}
+
+/// Заглушка раздела, который ещё не сделан.
+///
+/// Живёт здесь, а не в `SettingsRootView`: её показывают разделы «История»
+/// и «Расходы», то есть файлы разных слайсов.
+struct SectionPlaceholder: View {
+    private let symbol: String
+
+    init(symbol: String) {
+        self.symbol = symbol
+    }
+
+    var body: some View {
+        VStack(spacing: Palette.spaceSm) {
+            Image(systemName: symbol)
+                .font(.system(size: 28))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+            Text("Раздел в работе")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

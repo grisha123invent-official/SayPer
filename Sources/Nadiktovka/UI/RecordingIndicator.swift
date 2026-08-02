@@ -105,6 +105,10 @@ final class RecordingIndicator {
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.hidesOnDeactivate = false
+        // Пилюля — тёмное стекло в обеих темах: в светлой `.hudWindow` светлеет,
+        // и белая подпись на нём почти исчезает. Тема HUD фиксируется здесь,
+        // а не подбором цвета текста, — иначе поплывут и блик, и кромка.
+        panel.appearance = NSAppearance(named: .darkAqua)
 
         self.panel = panel
         self.glass = view
@@ -386,7 +390,7 @@ private final class IndicatorContentView: NSView {
 
     private static let titleAttributes: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: 11.5, weight: .medium),
-        .foregroundColor: NSColor.white.withAlphaComponent(0.92)
+        .foregroundColor: NSColor.white.withAlphaComponent(0.95)
     ]
 
     /// Ширина, при которой подпись помещается целиком и не болтается пустота.

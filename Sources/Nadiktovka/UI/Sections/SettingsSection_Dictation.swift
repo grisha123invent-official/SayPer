@@ -1,6 +1,10 @@
 import SwiftUI
 
 /// Раздел «Текст»: что и как приложение распознаёт и куда девает результат.
+///
+/// Две карточки: «Расшифровка» — всё, что влияет на распознанный текст,
+/// «Вставка» — что с ним делают дальше. Словарь отдельной карточки не получает:
+/// он подсказка для модели, то есть часть расшифровки.
 struct SettingsSectionDictation: View {
     @ObservedObject var model: SettingsModel
 
@@ -16,51 +20,99 @@ struct SettingsSectionDictation: View {
     var body: some View {
         SectionScaffold {
             transcription
-            vocabulary
             insertion
         }
     }
 
     private var transcription: some View {
-        GlassCard("Расшифровка") {
-            Picker("Модель", selection: $model.model) {
-                ForEach(TranscriptionModel.allCases) { item in
-                    Text(item.title).tag(item)
+        GlassCard("Расшифровка", separated: true) {
+            CardDivider()
+
+            SettingRow("Модель") {
+                Picker("", selection: $model.model) {
+                    ForEach(TranscriptionModel.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 260)
             }
 
-            Picker("Язык речи", selection: $model.language) {
-                ForEach(languages, id: \.0) { code, title in
-                    Text(title).tag(code)
+            CardDivider()
+
+            SettingRow("Язык речи") {
+                Picker("", selection: $model.language) {
+                    ForEach(languages, id: \.0) { code, title in
+                        Text(title).tag(code)
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 180)
             }
 
-            SwitchToggle("Причёсывать текст через gpt-4o-mini",
-                         subtitle: "Расставит пунктуацию и уберёт слова-паразиты. Добавляет ~1 секунду.",
-                         isOn: $model.cleanup)
+            CardDivider()
+            vocabulary
+            CardDivider()
+
+            SwitchToggle(
+                "Причёсывать текст",
+                subtitle: "Пунктуация и слова-паразиты, +1 секунда · gpt-4o-mini",
+                isOn: $model.cleanup
+            )
         }
     }
 
+    /// Подпись-заголовок над редактором убрана: что писать, объясняет плейсхолдер
+    /// внутри поля — там это видно ровно в тот момент, когда нужно (`ia.md` §3).
     private var vocabulary: some View {
-        GlassCard("Словарь") {
-            TextEditor(text: $model.vocabulary)
-                .frame(height: 60)
-                .font(.system(size: 12))
-                .scrollContentBackground(.hidden)
-                .padding(Palette.space2xs)
-                .background(Palette.surfaceTile)
-                .clipShape(RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous))
+        HStack(alignment: .top, spacing: Palette.spaceSm) {
+            Text("Словарь")
+                .font(.body)
+                .frame(height: Palette.rowHeight, alignment: .center)
 
-            Hint("Имена, термины и названия через запятую — их модель начинает узнавать.")
+            Spacer(minLength: Palette.spaceSm)
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $model.vocabulary)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 5)
+
+                if model.vocabulary.isEmpty {
+                    Text("имена и термины через запятую")
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(width: 330, height: 62)
+            .background(
+                RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous)
+                    .fill(Palette.surfaceField)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous)
+                    .strokeBorder(Palette.fieldBorder, lineWidth: 1)
+            )
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var insertion: some View {
-        GlassCard("Вставка") {
-            Picker("Способ", selection: $model.insertMode) {
-                ForEach(InsertMode.allCases) { item in
-                    Text(item.title).tag(item)
+        GlassCard("Вставка", separated: true) {
+            CardDivider()
+
+            SettingRow("Способ") {
+                Picker("", selection: $model.insertMode) {
+                    ForEach(InsertMode.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 300)
             }
         }
     }
