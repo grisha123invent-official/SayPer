@@ -474,16 +474,9 @@ private struct StatusPanelView: View {
                 .toggleStyle(GlassSwitchStyle())
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.black.opacity(0.30))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Palette.rimGlass, lineWidth: 1)
-        )
+        // Своей плашки у переключателей нет: выделять фоном есть смысл
+        // только список данных, а два контрола и так читаются как группа.
+        .padding(.horizontal, 4)
     }
 
     // MARK: Низ
