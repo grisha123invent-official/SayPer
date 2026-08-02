@@ -473,10 +473,10 @@ struct AmbientGlow: View {
             ],
             colors: colors
         )
-        .opacity(scheme == .dark ? 0.5 : 0.34)
+        .opacity(scheme == .dark ? 0.8 : 0.65)
         // Размытие убирает стыки сетки: нужен ровный переливающийся свет,
         // а не различимые пятна.
-        .blur(radius: 60)
+        .blur(radius: 48)
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }
@@ -484,15 +484,15 @@ struct AmbientGlow: View {
     private var colors: [Color] {
         if scheme == .dark {
             return [
-                Color(red: 0.16, green: 0.22, blue: 0.44), Color(red: 0.10, green: 0.13, blue: 0.28), Color(red: 0.22, green: 0.16, blue: 0.42),
-                Color(red: 0.09, green: 0.15, blue: 0.32), Color(red: 0.07, green: 0.09, blue: 0.18), Color(red: 0.15, green: 0.11, blue: 0.30),
-                Color(red: 0.10, green: 0.20, blue: 0.36), Color(red: 0.08, green: 0.11, blue: 0.22), Color(red: 0.18, green: 0.14, blue: 0.34)
+                Color(red: 0.13, green: 0.25, blue: 0.62), Color(red: 0.10, green: 0.16, blue: 0.42), Color(red: 0.34, green: 0.20, blue: 0.66),
+                Color(red: 0.08, green: 0.32, blue: 0.58), Color(red: 0.10, green: 0.12, blue: 0.30), Color(red: 0.28, green: 0.16, blue: 0.55),
+                Color(red: 0.10, green: 0.40, blue: 0.55), Color(red: 0.08, green: 0.18, blue: 0.44), Color(red: 0.22, green: 0.24, blue: 0.62)
             ]
         }
         return [
-            Color(red: 0.82, green: 0.87, blue: 1.00), Color(red: 0.93, green: 0.95, blue: 1.00), Color(red: 0.88, green: 0.85, blue: 1.00),
-            Color(red: 0.86, green: 0.92, blue: 1.00), Color(red: 0.97, green: 0.97, blue: 1.00), Color(red: 0.91, green: 0.88, blue: 1.00),
-            Color(red: 0.84, green: 0.93, blue: 0.99), Color(red: 0.94, green: 0.96, blue: 1.00), Color(red: 0.89, green: 0.90, blue: 1.00)
+            Color(red: 0.62, green: 0.76, blue: 1.00), Color(red: 0.82, green: 0.88, blue: 1.00), Color(red: 0.76, green: 0.70, blue: 1.00),
+            Color(red: 0.66, green: 0.84, blue: 1.00), Color(red: 0.92, green: 0.94, blue: 1.00), Color(red: 0.80, green: 0.74, blue: 1.00),
+            Color(red: 0.60, green: 0.86, blue: 0.98), Color(red: 0.84, green: 0.90, blue: 1.00), Color(red: 0.74, green: 0.78, blue: 1.00)
         ]
     }
 }
