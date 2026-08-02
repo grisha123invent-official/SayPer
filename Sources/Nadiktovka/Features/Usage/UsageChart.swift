@@ -59,7 +59,7 @@ struct UsageChart: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
-                    hovered = layout.index(atX: location.x)
+                    hovered = layout.index(at: location)
                 case .ended:
                     hovered = nil
                 }
@@ -196,17 +196,26 @@ struct UsageChart: View {
         private var plotWidth: CGFloat { max(width - padLeading - padTrailing, 1) }
         var band: CGFloat { plotWidth / CGFloat(max(points.count, 1)) }
 
-        /// Столбец — доля шага, но не толще 22: на семи днях столбцы шириной
-        /// в треть карточки читаются как заливка, а не как величина.
-        var barWidth: CGFloat { min(max(band * 0.55, 3), 22) }
+        /// Ширина столбца фиксирована мокапом — 10pt при любом числе дней.
+        /// Растёт зазор, а не столбец: на семи днях столбец в треть шага
+        /// читается как заливка, а не как величина. Сжимается только там,
+        /// где сам шаг стал уже столбца.
+        var barWidth: CGFloat { min(10, max(band - 2, 3)) }
 
         func centerX(_ index: Int) -> CGFloat {
             padLeading + band * CGFloat(index) + band / 2
         }
 
-        func index(atX x: CGFloat) -> Int? {
-            guard !points.isEmpty, x >= padLeading, x <= width - padTrailing else { return nil }
-            let index = Int((x - padLeading) / band)
+        /// Зона наведения ограничена и по вертикали: полоса подписей дат под
+        /// базовой линией к области построения не относится, и подсказка
+        /// со значением над ней всплывать не должна. Границы — из мокапа
+        /// (`.bar-hit`): от `padT - 10` до базовой линии плюс 2.
+        func index(at point: CGPoint) -> Int? {
+            guard point.y >= padTop - 10, point.y <= baseline + 2 else { return nil }
+            guard !points.isEmpty,
+                  point.x >= padLeading,
+                  point.x <= width - padTrailing else { return nil }
+            let index = Int((point.x - padLeading) / band)
             return points.indices.contains(index) ? index : nil
         }
 

@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import SwiftUI
 
 /// Обёртка над NSWindow, чтобы окно жило независимо от меню.
@@ -17,7 +16,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// ⌘1…⌘5. Через `keyboardShortcut` их не повесить: полоса разделов живёт
     /// в титлбаре, а `performKeyEquivalent` окна обходит только `contentView`.
     private var shortcutMonitor: Any?
-    private var sectionObserver: AnyCancellable?
 
     private static let size = NSSize(width: 740, height: 540)
     private static let minSize = NSSize(width: 700, height: 480)
@@ -87,9 +85,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         self.window = window
         installShortcutMonitor()
-        // Раздел запоминается сразу при переключении: окно закрывают крестиком,
-        // и ждать `windowWillClose` — значит терять состояние при выходе по ⌘Q.
-        sectionObserver = model.$section.sink { Settings.shared.lastSettingsSection = $0 }
 
         return window
     }
@@ -122,7 +117,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let window = self.window, window.isKeyWindow else { return event }
-            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else {
+            // Сравниваем только по значимым модификаторам: в
+            // `deviceIndependentFlagsMask` входят ещё `.capsLock`, `.numericPad`
+            // и `.function`, поэтому при горящем Caps Lock и на нумпаде
+            // строгое равенство `.command` не выполняется никогда.
+            let significant: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+            guard event.modifierFlags.intersection(significant) == .command else {
                 return event
             }
             // Пока в поле записывают сочетание, ⌘-клавиши принадлежат ему.
@@ -133,12 +133,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             }) else { return event }
 
             self.model.section = section
+            // Второй пользовательский путь смены раздела — наравне с кликом
+            // по сегменту полосы. Больше `ui.lastSection` не пишет никто:
+            // подписка на `model.$section` сохраняла и принудительные открытия
+            // из меню, и откат к «Ключ и доступ» при невыданном доступе,
+            // затирая раздел, на котором человек действительно работал.
+            Settings.shared.lastSettingsSection = section
             return nil
         }
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        Settings.shared.lastSettingsSection = model.section
     }
 
     deinit {

@@ -7,14 +7,8 @@ protocol StatusMenuActions: AnyObject {
     var menuStatusTitle: String { get }
     /// Работает ли перехват клавиатуры. Если нет — меню показывает пункт про доступ.
     var isHotkeyActive: Bool { get }
-    /// Текущий режим активации: подменю «Режим» ставит галочку на нём.
-    var menuActivation: HotkeyActivation { get }
 
     func menuOpenSettings(_ section: SettingsSection)
-    /// Сменить режим активации прямо из меню — единственная настройка, которую
-    /// меню меняет само (`design/ia.md` §4): она влияет на работу сию секунду.
-    /// Реализация сохраняет значение и заставляет шлюз перечитать его.
-    func menuSetActivation(_ mode: HotkeyActivation)
     func menuCopy(_ text: String)
     func menuInsertAgain(_ text: String)
     func menuShowDiagnostics()
@@ -103,24 +97,24 @@ final class StatusMenuBuilder: NSObject, NSMenuDelegate {
 
     /// Пункт подменю «Режим»: сам режим лежит в `representedObject`,
     /// как у «Настроек…», — так меню не заводит по обработчику на вариант.
+    ///
+    /// Пишем прямо в настройки, а не через `StatusMenuActions`: протокол
+    /// заморожен планом и расширять его слайсу запрещено. Канал до шлюза
+    /// не нужен — `RecordingGate` сам слушает `UserDefaults.didChangeNotification`
+    /// и перечитывает режим, как и карточка «Режим» в окне.
     @objc func setActivation(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let mode = HotkeyActivation(rawValue: raw) else { return }
-        actions?.menuSetActivation(mode)
+        Settings.shared.hotkeyActivation = mode
     }
 
-    /// «Причёсывать текст». Пишется прямо в настройки: в `StatusMenuActions`
-    /// метода под неё нет, а протокол заморожен планом. Настройку читают
-    /// в момент расшифровки, поэтому лишнего оповещения не нужно —
-    /// галочка в меню обновится при следующей сборке.
+    /// «Причёсывать текст». Пишется прямо в настройки той же дорогой, что и
+    /// режим: в `StatusMenuActions` метода под неё нет, а протокол заморожен.
+    ///
+    /// Своего состояния пункт не держит — галочку рисует снимок настроек при
+    /// следующей сборке меню. Единственный владелец значения — `Settings`.
     @objc func toggleCleanup(_ sender: NSMenuItem) {
-        let value = !Settings.shared.cleanup
-        Settings.shared.cleanup = value
-        sender.state = value ? .on : .off
-    }
-
-    @objc func toggleSounds() {
-        actions?.menuToggleSounds()
+        Settings.shared.cleanup = !Settings.shared.cleanup
     }
 
     @objc func showDiagnostics() {

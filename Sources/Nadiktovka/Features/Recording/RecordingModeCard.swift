@@ -11,9 +11,13 @@ import SwiftUI
 /// Своей модели у карточки нет: вызов `RecordingModeCard()` из раздела зафиксирован
 /// в подготовке, поэтому значения она берёт и пишет прямо в `Settings`. Шлюз
 /// подхватывает их сам, перезапуск не нужен.
+/// Авто-стоп своей строки в карточке не получил: `ia.md` §1.1 и `settings.html`
+/// описывают «Режим» ровно как сегменты плюс одну строку описания, и ни одна
+/// карточка в эталоне не меняет высоту при переключении сегментов. Предел живёт
+/// в `Settings+Recording` со значением по умолчанию в пять минут — это страховка
+/// от забытой записи (`plan.md` §5), а не настройка, которую ходят крутить.
 struct RecordingModeCard: View {
     @State private var mode: HotkeyActivation = Settings.shared.hotkeyActivation
-    @State private var autoStop: AutoStopLimit = Settings.shared.autoStopLimit
 
     var body: some View {
         GlassCard("Режим", separated: true) {
@@ -22,36 +26,21 @@ struct RecordingModeCard: View {
             SettingRow("Активация", subtitle: mode.summary) {
                 SegmentedControl(selection: $mode) { $0.title }
             }
-
-            // В удержании авто-стоп бессмыслен: запись живёт ровно столько,
-            // сколько нажата клавиша. Показывать выключенную строку «на всякий
-            // случай» — значит спрашивать про то, чего в этом режиме не бывает.
-            if mode == .toggle {
-                CardDivider()
-
-                SettingRow(
-                    "Автостоп",
-                    subtitle: "Если про запись забыли, она закончится и расшифруется сама"
-                ) {
-                    Picker("", selection: $autoStop) {
-                        ForEach(AutoStopLimit.allCases) { limit in
-                            Text(limit.title).tag(limit)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 140)
-                }
-            }
         }
         .onChange(of: mode) { newValue in
             Settings.shared.hotkeyActivation = newValue
         }
-        .onChange(of: autoStop) { newValue in
-            Settings.shared.autoStopLimit = newValue
-        }
         // Режим меняют и из меню в строке статуса — при открытом окне сегменты
         // обязаны сдвинуться сами, иначе окно показывает вчерашнюю правду.
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+        //
+        // `.receive(on:)` обязателен: уведомление приходит на потоке того, кто
+        // записал настройку, а `syncFromSettings()` меняет состояние SwiftUI —
+        // это можно делать только с главного потока.
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: UserDefaults.didChangeNotification)
+                .receive(on: RunLoop.main)
+        ) { _ in
             syncFromSettings()
         }
     }
@@ -61,8 +50,5 @@ struct RecordingModeCard: View {
     private func syncFromSettings() {
         let storedMode = Settings.shared.hotkeyActivation
         if storedMode != mode { mode = storedMode }
-
-        let storedLimit = Settings.shared.autoStopLimit
-        if storedLimit != autoStop { autoStop = storedLimit }
     }
 }

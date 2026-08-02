@@ -5,6 +5,8 @@ import SwiftUI
 struct SettingsSectionSystem: View {
     @ObservedObject var model: SettingsModel
 
+    @FocusState private var keyFieldFocused: Bool
+
     var body: some View {
         SectionScaffold {
             openAI
@@ -69,6 +71,7 @@ struct SettingsSectionSystem: View {
             SecureField("sk-…", text: $model.apiKey)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13).monospaced())
+                .focused($keyFieldFocused)
 
             Button {
                 model.pasteAPIKey()
@@ -84,16 +87,11 @@ struct SettingsSectionSystem: View {
             .help("Вставить из буфера")
         }
         .padding(.leading, Palette.spaceXs)
+        // 3, а не 6: у кнопки зона нажатия 20pt вокруг глифа 13pt, и правый
+        // край глифа встаёт ровно на 6 от края поля, как `.field .icon` в мокапе.
         .padding(.trailing, 3)
         .frame(height: Palette.capsuleHeight)
-        .background(
-            RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous)
-                .fill(Palette.surfaceField)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous)
-                .strokeBorder(Palette.fieldBorder, lineWidth: 1)
-        )
+        .fieldChrome(isFocused: keyFieldFocused)
     }
 
     private var keyboardAccess: some View {

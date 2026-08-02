@@ -22,7 +22,9 @@ struct StatusMenuContext {
     /// Итог за сегодня для строки «Сегодня: N мин · $X.XX».
     var today: UsageStore.Summary
     var cleanup: Bool
-    var playSounds: Bool
+    /// Раздел, на котором окно настроек закрыли в прошлый раз: «Настройки…»
+    /// возвращают человека туда же, куда и ⌘, из самого приложения.
+    var lastSection: SettingsSection
     var historyCount: Int
     var previewLength: Int
 
@@ -44,12 +46,15 @@ struct StatusMenuContext {
         return StatusMenuContext(
             statusTitle: actions?.menuStatusTitle ?? "",
             isHotkeyActive: actions?.isHotkeyActive ?? true,
-            activation: actions?.menuActivation ?? .hold,
+            // Режим читается из настроек, а не у `AppDelegate`: писателей
+            // двое (карточка «Режим» и это меню), оба пишут туда же, а шлюз
+            // перечитывает значение сам — лишнего звена в протоколе не нужно.
+            activation: settings.hotkeyActivation,
             lastText: carried ?? history.first?.text,
             history: history,
             today: UsageStore.shared.today,
             cleanup: settings.cleanup,
-            playSounds: settings.playSounds,
+            lastSection: settings.lastSettingsSection,
             historyCount: settings.menuHistoryCount,
             previewLength: settings.menuPreviewLength
         )
@@ -151,15 +156,25 @@ struct StatusMenuSections {
         let menu = NSMenu(title: "История")
         menu.autoenablesItems = false
 
-        for record in context.history.prefix(max(context.historyCount, 1)) {
-            let text = preview(record.text)
+        let records = Array(context.history.prefix(max(context.historyCount, 1)))
+        let rows = records.map { (head: preview($0.text), tail: Self.stamp($0.date)) }
 
-            let copy = item("\(text)  ·  \(Self.stamp(record.date))",
-                            #selector(StatusMenuBuilder.copyText))
+        // Правая колонка одна на всё подменю (`menu.html`: `.mi .tail` с
+        // `margin-left:auto`). Позиция считается по самому длинному превью,
+        // иначе на короткой расшифровке время уехало бы влево к тексту.
+        let column = Self.tailColumn(heads: rows.map { $0.head },
+                                     tails: rows.map { $0.tail } + [Self.insertTail])
+
+        for (record, row) in zip(records, rows) {
+            let copy = item(row.head, #selector(StatusMenuBuilder.copyText))
+            copy.attributedTitle = Self.twoColumnTitle(row.head, tail: row.tail, column: column)
             copy.representedObject = record.text
             menu.addItem(copy)
 
-            let insert = item("\(text)  ·  вставить", #selector(StatusMenuBuilder.insertText))
+            let insert = item(row.head, #selector(StatusMenuBuilder.insertText))
+            insert.attributedTitle = Self.twoColumnTitle(row.head,
+                                                         tail: Self.insertTail,
+                                                         column: column)
             insert.representedObject = record.text
             insert.keyEquivalentModifierMask = .option
             insert.isAlternate = true
@@ -198,14 +213,10 @@ struct StatusMenuSections {
         cleanup.state = context.cleanup ? .on : .off
         items.append(cleanup)
 
-        // Звуки — служебная мелочь («сейчас неудобно, чтобы пикало»), поэтому
-        // живут альтернативным пунктом под ⌥, тем же приёмом, что «Диагностика…»:
-        // в обычном виде меню их нет, но выключить можно не открывая окно.
-        let sounds = item("Звуковые сигналы", #selector(StatusMenuBuilder.toggleSounds))
-        sounds.state = context.playSounds ? .on : .off
-        sounds.keyEquivalentModifierMask = .option
-        sounds.isAlternate = true
-        items.append(sounds)
+        // Звуков здесь нет и не будет: `design/ia.md` §4 «Что в меню не попадает»
+        // называет их поимённо, а `menu.html` под ⌥ показывает ровно одну
+        // подмену — «Настройки…» → «Диагностика…». `menuToggleSounds` остаётся
+        // нереализованным в UI: протокол заморожен именно с таким расчётом.
 
         return items
     }
@@ -227,9 +238,15 @@ struct StatusMenuSections {
 
     // MARK: 5. Вход вглубь
 
+    /// «Настройки…» — обычная кликабельная строка с ⌘, (`menu.html`, `ia.md` §4).
+    ///
+    /// Подменю разделов здесь стоять не может: `NSMenuItem` с подменю не шлёт
+    /// action и не показывает keyEquivalent — то есть отбирает у пункта ровно
+    /// то, ради чего он существует. Вход в отдельные разделы остаётся там, где
+    /// он осмыслен: «Показать все…» → «История», «Сегодня: …» → «Расходы».
     var navigation: [NSMenuItem] {
-        let settings = NSMenuItem(title: "Настройки…", action: nil, keyEquivalent: ",")
-        settings.submenu = settingsSubmenu()
+        let settings = item("Настройки…", #selector(StatusMenuBuilder.openSettings), key: ",")
+        settings.representedObject = context.lastSection.rawValue
 
         // Альтернативный пункт: тот же keyEquivalent, другой модификатор —
         // так `NSMenu` подменяет «Настройки…» на «Диагностика…», пока держат ⌥.
@@ -239,21 +256,6 @@ struct StatusMenuSections {
         diagnostics.isAlternate = true
 
         return [settings, diagnostics]
-    }
-
-    /// Подменю разделов: окно открывается сразу на нужном, без прохода по вкладкам.
-    private func settingsSubmenu() -> NSMenu {
-        let menu = NSMenu(title: "Настройки")
-        menu.autoenablesItems = false
-
-        for section in SettingsSection.allCases {
-            let row = item(section.title, #selector(StatusMenuBuilder.openSettings))
-            row.representedObject = section.rawValue
-            row.image = Self.symbol(section.symbol)
-            menu.addItem(row)
-        }
-
-        return menu
     }
 
     // MARK: 6. Выход
@@ -282,6 +284,47 @@ struct StatusMenuSections {
 
         guard flat.count > limit else { return flat }
         return flat.prefix(limit - 1) + "…"
+    }
+
+    // MARK: - Правая колонка подменю «История»
+
+    /// Хвост альтернативного пункта: то же место, где у обычного стоит время.
+    private static let insertTail = "вставить"
+
+    /// Шрифт пунктов меню. Кегль 0 — «системный размер меню», тот же, которым
+    /// `NSMenu` рисует обычные заголовки: колонка обязана считаться по нему,
+    /// иначе она разъедется при другом размере системного шрифта.
+    private static var menuFont: NSFont { .menuFont(ofSize: 0) }
+
+    /// Позиция правого края колонки хвостов.
+    ///
+    /// Считается по самому длинному превью плюс отбивка 22pt (`menu.html`:
+    /// `.tail { padding-left: 22px }`) плюс самый длинный хвост — так все
+    /// хвосты кончаются на одной вертикали и ни один не наезжает на текст.
+    private static func tailColumn(heads: [String], tails: [String]) -> CGFloat {
+        ceil(widest(heads)) + 22 + ceil(widest(tails))
+    }
+
+    private static func widest(_ strings: [String]) -> CGFloat {
+        strings.reduce(0) { widest, string in
+            max(widest, (string as NSString).size(withAttributes: [.font: menuFont]).width)
+        }
+    }
+
+    /// Две колонки в одном заголовке: текст слева, хвост справа по табу.
+    ///
+    /// Цвет не задаётся намеренно: у `attributedTitle` заданный цвет переживает
+    /// подсветку пункта, и серый хвост остался бы серым на синей полосе.
+    private static func twoColumnTitle(_ head: String,
+                                       tail: String,
+                                       column: CGFloat) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.tabStops = [NSTextTab(textAlignment: .right, location: column)]
+
+        return NSAttributedString(
+            string: "\(head)\t\(tail)",
+            attributes: [.font: menuFont, .paragraphStyle: style]
+        )
     }
 
     /// «Сегодня: 12 мин · $0.08».
@@ -317,17 +360,26 @@ struct StatusMenuSections {
     /// Значок пункта. Без цвета — шаблонный: так он следует теме строки меню
     /// и остаётся читаемым в обеих. Цвет задаётся только баннеру отсутствия
     /// доступа, и это единственное цветное пятно в меню (`design/dna.md`, П6).
+    ///
+    /// Размер и вес задаются явно (`tokens.md` §9: значок в строке — 14pt,
+    /// начертание `regular`): без конфигурации SF Symbol берёт собственный
+    /// умолчательный кегль и раздувает высоту строк меню против эталона.
     static func symbol(_ name: String, color: NSColor? = nil) -> NSImage? {
         guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else {
             return nil
         }
 
+        let size = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+
         guard let color else {
-            image.isTemplate = true
-            return image
+            let plain = image.withSymbolConfiguration(size)
+            plain?.isTemplate = true
+            return plain
         }
 
-        let tinted = image.withSymbolConfiguration(.init(paletteColors: [color]))
+        let tinted = image.withSymbolConfiguration(
+            size.applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        )
         tinted?.isTemplate = false
         return tinted
     }

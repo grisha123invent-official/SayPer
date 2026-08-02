@@ -40,6 +40,11 @@ enum HistoryArchive {
             return []
         }
 
+        // Файл мог остаться от версии, которая писала его с правами 0644.
+        // Чинить такой архив надо при первом же чтении, а не ждать записи,
+        // которой может и не случиться.
+        restrictAccess()
+
         let ordered = stored.sorted { $0.date > $1.date }
         return Array(ordered.prefix(max(limit, 0)))
     }
@@ -59,8 +64,27 @@ enum HistoryArchive {
 
         do {
             try data.write(to: fileURL, options: .atomic)
+            restrictAccess()
         } catch {
             Log.write("История: не удалось записать архив — \(error.localizedDescription)")
+        }
+    }
+
+    /// Права 0600: файл читает и пишет только владелец.
+    ///
+    /// Это единственное место в приложении, где тексты расшифровок лежат
+    /// открытым JSON, а умолчание `Data.write` — 0644, то есть историю диктовок
+    /// видит любой другой пользователь этого Mac. Права выставляются после
+    /// каждой записи, а не однажды при создании: атомарная запись подменяет
+    /// файл целиком и права прежнего не наследует.
+    private static func restrictAccess() {
+        do {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: fileURL.path
+            )
+        } catch {
+            Log.write("История: не удалось ограничить доступ к архиву — \(error.localizedDescription)")
         }
     }
 

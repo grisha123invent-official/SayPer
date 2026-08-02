@@ -8,6 +8,8 @@ import SwiftUI
 struct SettingsSectionDictation: View {
     @ObservedObject var model: SettingsModel
 
+    @FocusState private var vocabularyFocused: Bool
+
     private let languages: [(String, String)] = [
         ("", "Автоопределение"),
         ("ru", "Русский"),
@@ -78,6 +80,7 @@ struct SettingsSectionDictation: View {
                     .scrollContentBackground(.hidden)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 5)
+                    .focused($vocabularyFocused)
 
                 if model.vocabulary.isEmpty {
                     Text("имена и термины через запятую")
@@ -89,14 +92,9 @@ struct SettingsSectionDictation: View {
                 }
             }
             .frame(width: 330, height: 62)
-            .background(
-                RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous)
-                    .fill(Palette.surfaceField)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous)
-                    .strokeBorder(Palette.fieldBorder, lineWidth: 1)
-            )
+            // Заливка, обводка и фокусное кольцо — одним кирпичиком:
+            // `.plain`-редактор системного кольца не рисует (`tokens.md` §11).
+            .fieldChrome(isFocused: vocabularyFocused)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

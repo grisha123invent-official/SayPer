@@ -48,9 +48,15 @@ enum Palette {
     /// от токена. `NSColor(name:dynamicProvider:)` пересчитывается сам при смене темы,
     /// поэтому вызывающим ничего знать не нужно.
     private static func themed(light: NSColor, dark: NSColor) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+        Color(nsColor: themedNS(light: light, dark: dark))
+    }
+
+    /// То же самое, но `NSColor`: поле записи хоткея рисуется на `CALayer`,
+    /// а слою нужен `CGColor`, который из SwiftUI-цвета не достать.
+    private static func themedNS(light: NSColor, dark: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
-        })
+        }
     }
 
     private static func white(_ alpha: CGFloat) -> NSColor { NSColor(white: 1, alpha: alpha) }
@@ -61,7 +67,9 @@ enum Palette {
     /// Вложенная плитка статистики, поле словаря, обычная кнопка-капсула.
     static var surfaceTile: Color { themed(light: black(0.045), dark: white(0.075)) }
     /// Строка под курсором.
-    static var surfaceRowHover: Color { themed(light: black(0.05), dark: white(0.07)) }
+    static var surfaceRowHover: Color { Color(nsColor: surfaceRowHoverNS) }
+    /// AppKit-двойник: наведение на поле записи хоткея (`components.md` §2).
+    static var surfaceRowHoverNS: NSColor { themedNS(light: black(0.05), dark: white(0.07)) }
     /// Выбранная строка списка.
     static var surfaceRowSelected: Color { Color(nsColor: .selectedContentBackgroundColor) }
     /// Активный сегмент полосы разделов в титлбаре.
@@ -72,7 +80,14 @@ enum Palette {
     /// Контур карточки-секции.
     static var rimCard: Color { themed(light: black(0.08), dark: white(0.10)) }
     /// Контур стеклянных поверхностей: HUD, капсула разделов.
+    ///
+    /// `tokens.md` §2 задаёт кромку парой: светлая обводка поверх и тёмная снизу.
+    /// Без нижней половины капсула в светлой теме висит в воздухе — она светлее
+    /// материала титлбара со всех четырёх сторон и не садится на него.
     static var rimGlass: Color { themed(light: white(0.55), dark: white(0.12)) }
+    /// Нижняя кромка стеклянной поверхности: в мокапе это вторая тень
+    /// капсулы (`0 .5px 1px`), а не вторая обводка.
+    static var rimGlassBottom: Color { themed(light: black(0.08), dark: white(0.04)) }
     /// Разделитель строк внутри карточки.
     static var hairline: Color { Color(nsColor: .separatorColor) }
 
@@ -83,6 +98,9 @@ enum Palette {
     }
     /// Выбранный сегмент.
     static var segmentThumb: Color { themed(light: white(1.0), dark: white(0.20)) }
+    /// Тень бегунка сегментов (`--seg-active-shadow` из мокапа): без неё белый
+    /// бегунок на светлой дорожке остаётся без края и «растворяется» в ней.
+    static var segmentThumbShadow: Color { themed(light: black(0.20), dark: black(0.35)) }
 
     /// Дорожка капсулы разделов: L1 из мокапа. Материал полосы даёт
     /// `NSVisualEffectView(.headerView)`, а капсула поверх него читается
@@ -91,7 +109,9 @@ enum Palette {
 
     /// Обводка полей ввода: у `.separatorColor` в светлой теме контраст к белому
     /// полю ниже порога, поле «растворяется» в карточке.
-    static var fieldBorder: Color { themed(light: black(0.16), dark: white(0.14)) }
+    static var fieldBorder: Color { Color(nsColor: fieldBorderNS) }
+    /// AppKit-двойник обводки поля — для поля записи хоткея.
+    static var fieldBorderNS: NSColor { themedNS(light: black(0.16), dark: white(0.14)) }
 
     /// Блик по верхней кромке — только у того, что парит (П4): HUD и капсула разделов.
     static let specular = LinearGradient(
@@ -146,6 +166,51 @@ struct VisualEffectBackground: NSViewRepresentable {
         view.material = material
         view.blendingMode = blending
         view.state = state
+    }
+}
+
+/// Оправа поля ввода: заливка, обводка и фокусное кольцо.
+///
+/// Поля в разделах собраны вручную из `TextField`/`SecureField`/`TextEditor`
+/// с `.textFieldStyle(.plain)`, а он снимает вместе с системным бордюром и
+/// системное фокусное кольцо — без него у полей нет состояния «фокус»
+/// (`tokens.md` §11). Кольцо рисуется цветом `keyboardFocusIndicatorColor`
+/// поверх обводки и **без анимации**: §10 прямо запрещает `transition` на фокусе.
+///
+/// Флаг приходит снаружи, потому что `@FocusState` живёт только в том виде,
+/// где объявлено само поле.
+struct FieldChrome: ViewModifier {
+    let isFocused: Bool
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Palette.surfaceField)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Palette.fieldBorder, lineWidth: 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius + 1.5, style: .continuous)
+                    .strokeBorder(
+                        Color(nsColor: .keyboardFocusIndicatorColor),
+                        lineWidth: 3
+                    )
+                    .padding(-2.5)
+                    .opacity(isFocused ? 1 : 0)
+            )
+            // Кольцо не участвует в раскладке: иначе поле бы дёргалось на фокусе.
+            .animation(nil, value: isFocused)
+    }
+}
+
+extension View {
+    /// Заливка `surfaceField`, обводка `fieldBorder` и фокусное кольцо.
+    func fieldChrome(isFocused: Bool, cornerRadius: CGFloat = Palette.radiusField) -> some View {
+        modifier(FieldChrome(isFocused: isFocused, cornerRadius: cornerRadius))
     }
 }
 
@@ -307,16 +372,23 @@ struct Hint: View {
 struct StatTile: View {
     private let value: String
     private let caption: String
+    private let isEmpty: Bool
 
-    init(value: String, caption: String) {
+    /// `isEmpty` — данных нет и в значении стоит прочерк: `components.md` §5
+    /// требует красить его `tertiaryLabelColor`, иначе «—» по контрасту
+    /// неотличим от настоящего числа. Раздел сам знает, пусто у него или нет,
+    /// а по содержимому строки это угадывать нельзя.
+    init(value: String, caption: String, isEmpty: Bool = false) {
         self.value = value
         self.caption = caption
+        self.isEmpty = isEmpty
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Palette.space2xs) {
             Text(value)
                 .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                .foregroundStyle(isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
             Text(caption)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -421,6 +493,13 @@ struct SegmentedControl<Value: Hashable>: View {
                     .background(
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .fill(fill)
+                            // Край бегунка: в мокапе `--seg-active-shadow`,
+                            // тень только у выбранного сегмента.
+                            .shadow(
+                                color: isSelected ? Palette.segmentThumbShadow : .clear,
+                                radius: 1,
+                                y: 0.5
+                            )
                     )
                     .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
@@ -480,6 +559,16 @@ struct CapsuleButton: View {
     private let isLoading: Bool
     private let action: () -> Void
 
+    /// Задержка показа и минимальное время жизни спиннера (`components.md` §7).
+    private static let spinnerDelay: Double = 0.150
+    private static let spinnerMinLifetime: Double = 0.300
+
+    /// Видимость спиннера отделена от `isLoading`: проверка ключа при валидном
+    /// ключе отвечает за десятки миллисекунд, и спиннер, привязанный к запросу
+    /// напрямую, успевает только мигнуть.
+    @State private var showsSpinner = false
+    @State private var spinnerShownAt: Date?
+
     init(
         _ title: String,
         kind: Kind = .normal,
@@ -497,7 +586,7 @@ struct CapsuleButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if isLoading {
+                if showsSpinner {
                     ProgressView()
                         .controlSize(.small)
                 } else if let symbol {
@@ -509,8 +598,31 @@ struct CapsuleButton: View {
             }
         }
         .buttonStyle(CapsuleButtonStyle(kind: kind))
-        // Пока идёт запрос, повторное нажатие не нужно — спиннер уже виден.
-        .disabled(isLoading)
+        // Пока идёт запрос, повторное нажатие не нужно; пока висит спиннер —
+        // кнопка тоже не нажимается, иначе получится живая кнопка со спиннером.
+        .disabled(isLoading || showsSpinner)
+        .task(id: isLoading) { await syncSpinner() }
+    }
+
+    @MainActor
+    private func syncSpinner() async {
+        if isLoading {
+            guard !showsSpinner else { return }
+            try? await Task.sleep(nanoseconds: UInt64(Self.spinnerDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            spinnerShownAt = Date()
+            showsSpinner = true
+        } else {
+            guard showsSpinner else { return }
+            let shown = spinnerShownAt.map { Date().timeIntervalSince($0) } ?? Self.spinnerMinLifetime
+            let rest = Self.spinnerMinLifetime - shown
+            if rest > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(rest * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+            }
+            showsSpinner = false
+            spinnerShownAt = nil
+        }
     }
 }
 

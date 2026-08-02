@@ -5,7 +5,7 @@ import Combine
 ///
 /// Хранит **только агрегаты** (`UsageDay`): текст расшифровки отбрасывается
 /// на входе, в `UsageSample`, и до этого хранилища не доходит. Это не мелочь
-/// оформления, а договорённость из `AppEvents.swift`: файл с текстами ровно
+/// оформления, а договорённость из `UsageSample.swift`: файл с текстами ровно
 /// один, и гасит его «Хранить историю», а не переключатель в расходах.
 ///
 /// API заморожен планом (`Summary`, `DayBucket`, `today`, `allTime`,
@@ -94,7 +94,10 @@ final class UsageStore: ObservableObject, TranscriptionObserver {
     func buckets(lastDays count: Int) -> [DayBucket] {
         guard count > 0 else { return [] }
         let today = calendar.startOfDay(for: Date())
-        let byDay = Dictionary(uniqueKeysWithValues: days.map { ($0.day, $0) })
+        // Дубликаты суток уже сняты на входе (`UsageArchive.collapsed`), но
+        // словарь строится из данных с диска, а `uniqueKeysWithValues` на них
+        // означает падение по precondition вместо показа статистики.
+        let byDay = Dictionary(days.map { ($0.day, $0) }, uniquingKeysWith: { $1 })
 
         return (0..<count).reversed().map { offset in
             let day = calendar.date(byAdding: .day, value: -offset, to: today) ?? today

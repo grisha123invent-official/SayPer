@@ -16,8 +16,16 @@ struct SettingsSectionUsage: View {
     var body: some View {
         SectionScaffold {
             expenses
-            if !summary.isEmpty {
-                models
+
+            // «По моделям» — разрез выбранного периода, поэтому и показывается
+            // по нему. Сброс — действие над всей статистикой, и прятать его
+            // из-за пустого периода значит запереть данные: стереть их нельзя,
+            // пока человек сам не догадается переключиться на «Всё время».
+            let rows = store.models(for: period)
+            if !rows.isEmpty {
+                models(rows)
+            }
+            if hasAnyData {
                 reset
             }
         }
@@ -27,6 +35,12 @@ struct SettingsSectionUsage: View {
 
     private var summary: UsageStore.Summary {
         store.summary(for: period)
+    }
+
+    /// Есть ли записи вообще — не за выбранный период. Разные вопросы:
+    /// «расшифровок ещё не было» и «за эти семь дней ничего не тратили».
+    private var hasAnyData: Bool {
+        !store.allTime.isEmpty
     }
 
     private var chartPoints: [UsageChart.Point] {
@@ -51,9 +65,9 @@ struct SettingsSectionUsage: View {
 
                 // Единственная подсказка в разделе: из плитки «$2.34» не видно,
                 // откуда взялось число, а это ровно тот случай, когда подсказка
-                // объясняет невидимое последствие.
-                Hint("Оценка по тарифу выбранной модели на момент запроса — "
-                     + "API не возвращает точный расход")
+                // объясняет невидимое последствие. Длина — 51 символ при
+                // пределе 60 из `tokens.md` §6.
+                Hint("Оценка по тарифу выбранной модели на момент запроса")
                     .padding(.top, 10)
 
                 numbersToggle
@@ -88,13 +102,18 @@ struct SettingsSectionUsage: View {
 
     /// Пусто — это не ошибка и не повод для иллюстрации: одна строка о том,
     /// откуда возьмутся цифры, и всё.
+    ///
+    /// Текста два, и путать их нельзя: «расшифровок ещё не было» — неправда,
+    /// когда запись была десять дней назад, а период стоит «7 дней».
     private var emptyState: some View {
         HStack(spacing: Palette.spaceXs) {
             Image(systemName: SettingsSection.usage.symbol)
                 .font(.system(size: 15))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)
-            Text("Здесь появятся расходы после первой расшифровки")
+            Text(hasAnyData
+                 ? "За этот период расходов нет"
+                 : "Здесь появятся расходы после первой расшифровки")
                 .font(.body)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -122,16 +141,17 @@ struct SettingsSectionUsage: View {
         if showsNumbers {
             ScrollView {
                 VStack(spacing: 0) {
-                    ForEach(store.buckets(lastDays: period.chartDays).reversed()) { bucket in
-                        HStack {
-                            Text(Self.dayFormatter.string(from: bucket.day))
-                                .foregroundStyle(.secondary)
-                            Spacer(minLength: Palette.spaceSm)
-                            Text(Pricing.money(bucket.summary.cost))
-                                .monospacedDigit()
-                        }
-                        .font(.subheadline)
-                        .frame(height: 22)
+                    // Заголовок колонок — как в мокапе (<thead> «День / Потрачено»).
+                    numbersRow(day: "День", amount: "Потрачено", isHeader: true)
+
+                    // Порядок хронологический, слева направо как ось графика:
+                    // список — текстовая замена графику, а не отдельный отчёт.
+                    ForEach(store.buckets(lastDays: period.chartDays)) { bucket in
+                        numbersRow(
+                            day: Self.dayFormatter.string(from: bucket.day),
+                            amount: Pricing.money(bucket.summary.cost),
+                            isHeader: false
+                        )
                     }
                 }
             }
@@ -140,13 +160,25 @@ struct SettingsSectionUsage: View {
         }
     }
 
+    private func numbersRow(day: String, amount: String, isHeader: Bool) -> some View {
+        HStack {
+            Text(day)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: Palette.spaceSm)
+            Text(amount)
+                .monospacedDigit()
+                .foregroundStyle(isHeader ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+        }
+        .font(.subheadline)
+        .frame(height: 22)
+    }
+
     // MARK: - Карточка «По моделям»
 
-    private var models: some View {
+    private func models(_ rows: [UsageStore.ModelUsage]) -> some View {
         GlassCard("По моделям", separated: true) {
             CardDivider()
 
-            let rows = store.models(for: period)
             let maxCost = rows.map(\.cost).max() ?? 0
 
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in

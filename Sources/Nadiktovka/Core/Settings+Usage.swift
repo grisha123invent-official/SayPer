@@ -30,16 +30,25 @@ enum UsagePeriod: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Начало периода или `nil`, если ограничения нет.
-    func start(now: Date = Date(), calendar: Calendar = .current) -> Date? {
+    /// Сколько суток охватывает период, считая сегодняшние. `nil` — без границы.
+    var spanDays: Int? {
         switch self {
-        case .week:
-            return calendar.startOfDay(for: now).addingTimeInterval(-6 * 24 * 3600)
-        case .month:
-            return calendar.startOfDay(for: now).addingTimeInterval(-29 * 24 * 3600)
-        case .allTime:
-            return nil
+        case .week: return 7
+        case .month: return 30
+        case .allTime: return nil
         }
+    }
+
+    /// Начало периода или `nil`, если ограничения нет.
+    ///
+    /// Отсчёт — сутками календаря, а не умножением на 86400: в поясе с переводом
+    /// часов сутки бывают на час короче, и окно плиток разошлось бы с окном
+    /// графика (`UsageStore.buckets`, там уже календарь). Итог в плитке тогда
+    /// оказывается больше суммы видимых столбцов.
+    func start(now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        guard let span = spanDays else { return nil }
+        let today = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: .day, value: -(span - 1), to: today) ?? today
     }
 }
 

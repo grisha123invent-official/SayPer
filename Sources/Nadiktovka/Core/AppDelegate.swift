@@ -304,9 +304,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Запись
 
     private func beginRecording() {
-        guard !isBusy, !recorder.isRecording else { return }
+        // Шлюз считает запись начатой, как только отдал команду. Если мы
+        // выходим отсюда, не начав её, он обязан узнать об этом — иначе
+        // в режиме «нажал-нажал» следующее нажатие будет принято за
+        // завершение несуществующей записи, и фраза потеряется.
+        guard !isBusy, !recorder.isRecording else {
+            gate.recordingDidStop()
+            return
+        }
 
         guard Settings.shared.apiKey != nil else {
+            gate.recordingDidStop()
             fail("не задан API-ключ")
             settingsWindow.show()
             return
@@ -368,12 +376,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let text = try await Transcriber.transcribe(fileURL: result.url)
                 guard !Task.isCancelled else { return }
+
+                // Запись, остановленная авто-стопом, доставляется в буфер, а не
+                // печатается: человек про неё забыл, и вслепую вставлять минуты
+                // речи в случайное поле нельзя. Подмена одноразовая.
+                let insertMode = gate.consumeInsertModeOverride() ?? Settings.shared.insertMode
+
                 Log.write("Расшифровано \(text.count) символов, вставляю "
-                          + "способом «\(Settings.shared.insertMode.title)»")
+                          + "способом «\(insertMode.title)»")
                 lastText = text
                 indicator.hide()
                 status = .idle
-                TextInserter.deliver(text, mode: Settings.shared.insertMode)
+                TextInserter.deliver(text, mode: insertMode)
                 play("Purr")
 
                 TranscriptionBus.publish(TranscriptionRecord(
@@ -490,11 +504,7 @@ extension AppDelegate: StatusMenuActions {
     }
 
     func menuSetActivation(_ mode: HotkeyActivation) {
-        // Ключ `record.activation` — общий с `RecordingGate.reload()`; своего
-        // свойства в `Settings` для него нет, его заводит слайс «Нажал-нажал»
-        // в `Settings+Recording.swift`. Здесь пишем тем же типизированным
-        // хелпером, чтобы не расширять замороженный `Settings.swift`.
-        Settings.shared.set(mode.rawValue, forKey: "record.activation")
+        Settings.shared.hotkeyActivation = mode
         // Шлюз — единственный, кто знает про режимы: он перечитывает настройку
         // и заодно сбрасывает состояние, чтобы смена на полуслове не залипла.
         gate.reload()

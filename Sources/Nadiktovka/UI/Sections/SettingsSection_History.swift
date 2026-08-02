@@ -32,6 +32,13 @@ struct SettingsSectionHistory: View {
             list
                 .padding(.top, Palette.spaceSm)
 
+            // Появляется, только когда «Вставить снова» честно призналось,
+            // что вставлять было некуда, — и гаснет само.
+            if let notice = store.notice {
+                Hint(notice)
+                    .padding(.top, Palette.spaceXs)
+            }
+
             HStack(spacing: 0) {
                 // Обычная капсула, не красная: второе контрастное пятно
                 // на экране заводить нельзя (П6), а действие не катастрофично.
@@ -98,20 +105,11 @@ struct SettingsSectionHistory: View {
             onCopy: { store.copy(record) },
             onInsertAgain: { store.insertAgain(record) }
         )
-        // Дубль действий строки: афорданс, живущий только под курсором,
-        // запрещён (`ia.md` §1.3). Кнопки в строке под удаление нет намеренно —
+        // Контекстного меню здесь нет намеренно: `HistoryRow` объявляет своё
+        // внутри себя, а из двух вложенных SwiftUI показывает внутреннее.
+        // Наружное не открылось бы никогда, зато создавало бы впечатление,
+        // что построчное удаление доступно. Кнопки удаления в строке тоже нет:
         // промахнуться мимо «скопировать» и стереть запись не должно быть легко.
-        //
-        // Оговорка: `HistoryRow` объявляет собственное контекстное меню внутри
-        // себя, и вложенные меню SwiftUI разрешает в пользу внутреннего. Пока
-        // в `DesignSystem` у строки не появится `onRemove`, это меню может
-        // оставаться в тени — правка чужого файла в границы слайса не входит.
-        .contextMenu {
-            Button("Скопировать") { store.copy(record) }
-            Button("Вставить снова") { store.insertAgain(record) }
-            Divider()
-            Button("Удалить") { store.remove(record) }
-        }
     }
 
     private func emptyState(symbol: String, text: String) -> some View {
@@ -130,8 +128,10 @@ struct SettingsSectionHistory: View {
 
     private var searchField: some View {
         HStack(spacing: 6) {
+            // 14pt — размер иконки в строке по `tokens.md` §9 и `.field .icon`
+            // из мокапа; на 12 значок выпадал из ряда с остальными полями.
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(.system(size: 14))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)
 
@@ -153,8 +153,9 @@ struct SettingsSectionHistory: View {
                 .help("Очистить поиск")
             }
         }
+        // Поле мокапа: `padding: 0 6px 0 8px`.
         .padding(.leading, Palette.spaceXs)
-        .padding(.trailing, 3)
+        .padding(.trailing, 6)
         .frame(height: Palette.capsuleHeight)
         .background(
             RoundedRectangle(cornerRadius: Palette.radiusField, style: .continuous)

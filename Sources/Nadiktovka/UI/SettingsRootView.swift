@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// Панель раздела: подложка L2, баннер доступа и сам раздел.
@@ -39,6 +40,15 @@ struct SettingsRootView: View {
         // поэтому акцентные кнопки внутри карточек гаснут (П6).
         .environment(\.accentActionsMuted, !model.accessibilityGranted)
         .onAppear { model.refreshPermissions() }
+        // Доступ выдают в Системных настройках, то есть в другом приложении:
+        // единственный надёжный момент перечитать состояние — возвращение сюда.
+        // Иначе баннер висит и после выданного доступа, а акцентные кнопки
+        // в карточках остаются погашенными до перезапуска окна.
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            model.refreshPermissions()
+        }
     }
 
     @ViewBuilder
@@ -92,24 +102,33 @@ struct SettingsTabStrip: View {
             ForEach(SettingsSection.allCases) { item in
                 Segment(item: item, isSelected: model.section == item) {
                     model.section = item
+                    // Запоминается только то, куда человек перешёл сам. Открытия
+                    // из меню (`show(.usage)`) и принудительный «Ключ и доступ»
+                    // при невыданном доступе запомненный раздел не переписывают.
+                    Settings.shared.lastSettingsSection = item
                 }
             }
         }
         .padding(2)
         .frame(height: Palette.tabCapsuleHeight)
+        // Блик — под кнопками, как `.tabs::before` под `.tab { z-index: 1 }`
+        // в мокапе: он светит по кромке дорожки, а не поверх иконок и подписей.
+        // Нижняя кромка (`tokens.md` §2) — тенью, как второй `box-shadow`
+        // капсулы: без неё капсула не садится на материал титлбара.
         .background(
-            Capsule(style: .continuous)
-                .fill(Palette.surfaceTabTrack)
-        )
-        // Блик по верхней кромке — капсула парит над шасси (П4).
-        .overlay(
-            Capsule(style: .continuous)
-                .fill(Palette.specular)
-                .allowsHitTesting(false)
+            ZStack {
+                Capsule(style: .continuous)
+                    .fill(Palette.surfaceTabTrack)
+                    .shadow(color: Palette.rimGlassBottom, radius: 0.5, y: 0.5)
+                Capsule(style: .continuous)
+                    .fill(Palette.specular)
+            }
+            .allowsHitTesting(false)
         )
         .overlay(
             Capsule(style: .continuous)
                 .strokeBorder(Palette.rimGlass, lineWidth: 1)
+                .allowsHitTesting(false)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)

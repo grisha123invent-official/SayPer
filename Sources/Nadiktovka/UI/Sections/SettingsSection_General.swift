@@ -23,28 +23,12 @@ struct SettingsSectionGeneral: View {
                 "Зажимать",
                 subtitle: "Кликни и зажми сочетание. Левые и правые клавиши различаются"
             ) {
-                HStack(spacing: Palette.spaceXs) {
-                    HotkeyRecorder(hotkey: $model.hotkey)
-                        .frame(width: 190, height: 28)
-
-                    // Сброс показывается, только когда есть что сбрасывать.
-                    // Держать его под курсором нельзя: афорданс, живущий
-                    // только в наведении, для клавиатуры не существует.
-                    if model.hotkey != .rightOptionOnly {
-                        Button {
-                            model.hotkey = .rightOptionOnly
-                        } label: {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 12))
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 20, height: 20)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Вернуть правый ⌥")
-                    }
-                }
+                // Сброс живёт внутри поля, у правого края с отступом 6
+                // (`components.md` §2), и рисует его сам рекордер. Отдельной
+                // кнопкой рядом он сдвигал поле на 28pt в момент появления —
+                // то есть ровно тогда, когда человек целится в клавиши.
+                HotkeyRecorder(hotkey: $model.hotkey)
+                    .frame(width: 190, height: 28)
             }
         }
     }

@@ -67,6 +67,11 @@ final class UsageArchive {
     }
 
     /// Читает агрегаты, отсортированные по возрастанию даты.
+    ///
+    /// Дубликаты суток схлопываются здесь же: инвариант «один день — одна
+    /// запись» должен держаться на границе с диском, как и остальные проверки
+    /// файла. Дальше по коду день служит ключом словаря, и второй такой же
+    /// ронял бы приложение при открытии раздела.
     func load() -> [UsageDay] {
         guard let data = try? Data(contentsOf: url) else { return [] }
         guard let payload = try? Self.decoder.decode(Payload.self, from: data),
@@ -74,7 +79,7 @@ final class UsageArchive {
             Log.write("Файл расходов не прочитан, начинаю с пустой статистики")
             return []
         }
-        return payload.days.sorted { $0.day < $1.day }
+        return Self.collapsed(payload.days).sorted { $0.day < $1.day }
     }
 
     /// Записывает агрегаты целиком. Файл маленький, частичная запись
@@ -100,10 +105,53 @@ final class UsageArchive {
     }
 
     /// Отсекает всё старше срока хранения.
+    ///
+    /// Срок набирается сутками календаря, а не умножением на 86400: в поясе
+    /// с переводом часов сутки бывают на час короче или длиннее, и граница
+    /// хранения поехала бы относительно тех же суток на графике.
     static func pruned(_ days: [UsageDay], now: Date = Date(), calendar: Calendar = .current) -> [UsageDay] {
-        let edge = calendar.startOfDay(for: now)
-            .addingTimeInterval(-Double(retentionDays) * 24 * 3600)
+        let today = calendar.startOfDay(for: now)
+        let edge = calendar.date(byAdding: .day, value: -retentionDays, to: today) ?? today
         return days.filter { $0.day >= edge }
+    }
+
+    /// Схлопывает записи с одинаковым днём в одну.
+    ///
+    /// Складываем, а не оставляем последнюю: файл задуман читаемым и правимым
+    /// глазами, и две записи за одни сутки — это чаще всего две части одного дня
+    /// (слияние резервной копии, правка руками, второй экземпляр приложения),
+    /// а не старое и новое значение одного и того же.
+    ///
+    /// Порядок первого появления сохраняется — сортировка идёт отдельным шагом.
+    static func collapsed(_ days: [UsageDay]) -> [UsageDay] {
+        var merged: [Date: UsageDay] = [:]
+        var order: [Date] = []
+
+        for day in days {
+            guard var entry = merged[day.day] else {
+                merged[day.day] = day
+                order.append(day.day)
+                continue
+            }
+
+            entry.count += day.count
+            entry.duration += day.duration
+            entry.words += day.words
+            entry.characters += day.characters
+            entry.cost += day.cost
+
+            for (modelID, totals) in day.models {
+                var model = entry.models[modelID] ?? UsageModelTotals()
+                model.count += totals.count
+                model.duration += totals.duration
+                model.cost += totals.cost
+                entry.models[modelID] = model
+            }
+
+            merged[day.day] = entry
+        }
+
+        return order.compactMap { merged[$0] }
     }
 
     // MARK: -
