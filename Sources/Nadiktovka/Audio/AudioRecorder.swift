@@ -46,6 +46,11 @@ final class AudioRecorder {
             throw RecorderError.micDenied
         }
 
+        // Устройство назначаем до первого обращения к формату: движок
+        // запрашивает параметры у того устройства, которое стоит в этот момент,
+        // и переключать его потом уже поздно.
+        selectInputDevice()
+
         let input = engine.inputNode
         let inputFormat = input.inputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0 else {
@@ -82,6 +87,44 @@ final class AudioRecorder {
 
         isRecording = true
         startedAt = Date()
+    }
+
+    /// Назначает движку конкретное устройство ввода.
+    ///
+    /// Без этого AVAudioEngine берёт системное «по умолчанию», а это сплошь
+    /// и рядом беспроводные наушники — и запись отбирает их у телефона.
+    /// Единственный способ задать устройство на macOS — достучаться до AUHAL
+    /// под движком: у самого AVAudioEngine такого свойства нет.
+    private func selectInputDevice() {
+        let mode = Settings.shared.microphoneMode
+        guard let device = AudioDevices.resolve(mode) else {
+            Log.write("Микрофон: \(AudioDevices.explain(mode))")
+            return
+        }
+
+        // Выходной узел движка отдельно не переключается: на macOS вход и выход
+        // AVAudioEngine — один и тот же HAL-узел, и запись устройства вывода
+        // сбрасывает устройство ввода. Проверено: после такой попытки выбор
+        // микрофона возвращал -10851, а движок — «микрофон не отдаёт данные».
+        var id = device.id
+        let unit = engine.inputNode.audioUnit
+        guard let unit else { return }
+
+        let status = AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &id,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+
+        if status == noErr {
+            Log.write("Микрофон: \(AudioDevices.explain(mode))")
+        } else {
+            Log.write("Микрофон: не удалось выбрать «\(device.name)» (код \(status)), "
+                      + "остаётся системный")
+        }
     }
 
     /// Останавливает запись и возвращает файл и его длительность.

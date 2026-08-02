@@ -13,6 +13,9 @@ struct SettingsSectionGeneral: View {
 
     @State private var duckMode = Settings.shared.duckMode
     @State private var duckLevel = Settings.shared.duckLevel
+    @State private var micChoice = MicrophoneChoice(Settings.shared.microphoneMode)
+    @State private var micDevices = AudioDevices.inputs()
+    @State private var micExplained = AudioDevices.explain(Settings.shared.microphoneMode)
 
     private let languages: [(String, String)] = [
         ("", "Автоопределение"),
@@ -26,6 +29,7 @@ struct SettingsSectionGeneral: View {
     var body: some View {
         SectionScaffold {
             activation
+            microphone
             duringRecording
             transcription
             insertion
@@ -50,6 +54,44 @@ struct SettingsSectionGeneral: View {
             }
 
             RecordingModeRow()
+        }
+    }
+
+    // MARK: - Откуда слушать
+
+    private var microphone: some View {
+        GlassCard("Микрофон") {
+            SettingRow("Устройство", subtitle: micExplained) {
+                Picker("", selection: $micChoice) {
+                    Text("Умно").tag(MicrophoneChoice.smart)
+                    Text("Встроенный").tag(MicrophoneChoice.builtIn)
+                    Text("Как в системе").tag(MicrophoneChoice.systemDefault)
+                    Divider()
+                    ForEach(micDevices) { device in
+                        Text(device.name).tag(MicrophoneChoice.specific(device.uid))
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 240)
+                .onChange(of: micChoice) { _, choice in
+                    Settings.shared.microphoneMode = choice.mode
+                    micExplained = AudioDevices.explain(choice.mode)
+                }
+            }
+
+            // Ради чего вся настройка: беспроводные наушники, подключённые
+            // и к маку, и к телефону, числятся микрофоном по умолчанию, даже
+            // когда играет телефон. Открыв на них вход, приложение отбирает
+            // их у телефона и обрывает музыку.
+            Hint("«Умно» не трогает беспроводные наушники, пока ты слушаешь через них "
+                 + "не мак, а телефон: в этом случае запись идёт со встроенного микрофона. "
+                 + "Как только звук пойдёт с мака, диктовка снова пойдёт через наушники.")
+        }
+        // Список устройств меняется, пока окно открыто: наушники подключают
+        // и отключают. Обновляем при каждом показе раздела.
+        .onAppear {
+            micDevices = AudioDevices.inputs()
+            micExplained = AudioDevices.explain(Settings.shared.microphoneMode)
         }
     }
 
@@ -176,6 +218,33 @@ struct SettingsSectionGeneral: View {
                 .labelsHidden()
                 .frame(width: 300)
             }
+        }
+    }
+}
+
+/// Обёртка над `MicrophoneMode` для `Picker`: ему нужен Hashable-тег,
+/// а разбирать ассоциированное значение в каждой ветке меню неудобно.
+enum MicrophoneChoice: Hashable {
+    case smart
+    case builtIn
+    case systemDefault
+    case specific(String)
+
+    init(_ mode: MicrophoneMode) {
+        switch mode {
+        case .smart: self = .smart
+        case .builtIn: self = .builtIn
+        case .systemDefault: self = .systemDefault
+        case .specific(let uid): self = .specific(uid)
+        }
+    }
+
+    var mode: MicrophoneMode {
+        switch self {
+        case .smart: return .smart
+        case .builtIn: return .builtIn
+        case .systemDefault: return .systemDefault
+        case .specific(let uid): return .specific(uid)
         }
     }
 }

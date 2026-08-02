@@ -340,6 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Универсальный доступ: \(HotkeyMonitor.isTrusted ? "выдан" : "НЕ ВЫДАН")
         Мониторинг ввода: \(HotkeyMonitor.inputMonitoringStatus)
         Микрофон: \(micStatus)
+        Устройство записи: \(AudioDevices.explain(Settings.shared.microphoneMode))
         API-ключ: \(Settings.shared.apiKey == nil ? "не задан" : "задан") · \(Keychain.backendDescription)
         Хоткей: \(Settings.shared.hotkey.displayString)
         Вставка: \(Settings.shared.insertMode.title)

@@ -58,6 +58,7 @@ enum Sounds {
         // закончена» звучит почти сразу за «текст вставлен».
         guard let sound = NSSound(named: event.systemName) else { return }
         sound.volume = volume
+        route(sound)
         sound.play()
     }
 
@@ -67,7 +68,18 @@ enum Sounds {
         let volume = Float(Settings.shared.soundVolume)
         guard volume > 0.001, let sound = NSSound(named: event.systemName) else { return }
         sound.volume = volume
+        route(sound)
         sound.play()
+    }
+
+    /// Уводит сигнал с беспроводных наушников, если мак через них молчит.
+    ///
+    /// Иначе короткий «тинь» на старте записи будит наушники, подключённые
+    /// и к маку, и к телефону: они уходят с телефона на мак, и музыка
+    /// обрывается. Человек нажал диктовать, а не переключать наушники.
+    private static func route(_ sound: NSSound) {
+        guard let device = AudioDevices.soundOutput() else { return }
+        sound.playbackDeviceIdentifier = device.uid
     }
 }
 
