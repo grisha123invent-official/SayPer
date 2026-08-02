@@ -16,6 +16,18 @@ enum Palette {
     static let spaceXl: CGFloat = 24
     static let space2xl: CGFloat = 32
 
+    // Вертикальный ритм. Базовая шкала выше рассчитана на плотные системные
+    // панели, а здесь окно просторное и разделов немного — по высоте всё
+    // выглядело набитым. Эти четыре значения дают воздух, не трогая ширину.
+    /// Между карточками в панели раздела.
+    static let spaceCardGap: CGFloat = 30
+    /// Верхнее и нижнее поле внутри карточки.
+    static let spaceCardVertical: CGFloat = 20
+    /// Между строками внутри карточки.
+    static let spaceCardRows: CGFloat = 16
+    /// Отбивка вокруг разделителя-волоска.
+    static let spaceDivider: CGFloat = 12
+
     static let radiusCard: CGFloat = 12
     static let radiusTile: CGFloat = 10
     static let radiusField: CGFloat = 6
@@ -25,8 +37,8 @@ enum Palette {
     static let contentWidth: CGFloat = 640
 
     /// Высота строки настройки: одна строка / строка с описанием под ней.
-    static let rowHeight: CGFloat = 28
-    static let rowHeightWithSubtitle: CGFloat = 44
+    static let rowHeight: CGFloat = 32
+    static let rowHeightWithSubtitle: CGFloat = 50
     /// Высота строки списка истории.
     static let historyRowHeight: CGFloat = 36
     /// Высота кнопки-капсулы (`components.md` §7).
@@ -224,13 +236,13 @@ struct SectionScaffold<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Palette.spaceXl) {
+            VStack(alignment: .leading, spacing: Palette.spaceCardGap) {
                 content
             }
             .frame(maxWidth: Palette.contentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, Palette.spaceLg)
-            .padding(.vertical, Palette.spaceLg)
+            .padding(.vertical, Palette.spaceXl)
         }
         // Подложку панели (L2) держит корень окна: у панели своего материала нет,
         // иначе получится второй слой размытия на той же глубине (П2).
@@ -264,7 +276,7 @@ struct GlassCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: separated ? 0 : Palette.spaceSm) {
+        VStack(alignment: .leading, spacing: separated ? 0 : Palette.spaceCardRows) {
             HStack(spacing: Palette.spaceXs) {
                 Text(title).font(.headline)
                 Spacer(minLength: Palette.spaceXs)
@@ -277,7 +289,9 @@ struct GlassCard<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Palette.spaceMd)
+        // По горизонтали ширина заказчика устраивает, по вертикали было тесно.
+        .padding(.horizontal, Palette.spaceMd)
+        .padding(.vertical, Palette.spaceCardVertical)
         .background(
             RoundedRectangle(cornerRadius: Palette.radiusCard, style: .continuous)
                 .fill(Palette.surfaceCard)
@@ -412,7 +426,7 @@ struct CardDivider: View {
     private let inset: CGFloat
     private let spacing: CGFloat
 
-    init(inset: CGFloat = Palette.spaceSm, spacing: CGFloat = Palette.spaceXs) {
+    init(inset: CGFloat = Palette.spaceSm, spacing: CGFloat = Palette.spaceDivider) {
         self.inset = inset
         self.spacing = spacing
     }
