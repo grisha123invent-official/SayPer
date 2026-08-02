@@ -1,6 +1,6 @@
 import Foundation
 
-/// Пишет события в ~/Library/Logs/Надиктовка.log — чтобы можно было понять,
+/// Пишет события в ~/Library/Logs/SayPer.log — чтобы можно было понять,
 /// на каком шаге всё встало, не запуская отладчик.
 enum Log {
     /// Основное место — ~/Library/Logs. Если туда писать нельзя
@@ -8,9 +8,9 @@ enum Log {
     static let fileURL: URL = {
         let candidates = [
             FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Logs/Надиктовка.log"),
+                .appendingPathComponent("Library/Logs/SayPer.log"),
             URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent("Надиктовка.log")
+                .appendingPathComponent("SayPer.log")
         ]
 
         for url in candidates where isWritable(url) {

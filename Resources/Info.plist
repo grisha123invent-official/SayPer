@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Надиктовка</string>
+    <string>SayPer</string>
     <key>CFBundleDisplayName</key>
-    <string>Надиктовка</string>
+    <string>SayPer</string>
     <key>CFBundleExecutable</key>
     <string>Nadiktovka</string>
     <key>CFBundleIdentifier</key>

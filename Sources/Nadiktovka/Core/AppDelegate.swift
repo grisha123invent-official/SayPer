@@ -189,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .failed: symbol = "exclamationmark.triangle"
         }
 
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Надиктовка")
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "SayPer")
         button.image?.isTemplate = true
         button.contentTintColor = {
             switch status {
@@ -248,9 +248,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Без него приложение не видит горячую клавишу и не может вставлять текст.
 
         Системные настройки → Конфиденциальность и безопасность → \
-        Универсальный доступ → включи «Надиктовка».
+        Универсальный доступ → включи «SayPer».
 
-        Если «Надиктовка» уже есть в списке, но не работает — удали её кнопкой «−», \
+        Если «SayPer» уже есть в списке, но не работает — удали её кнопкой «−», \
         затем добавь заново кнопкой «+» из папки «Программы».
 
         Перезапускать приложение не нужно: как только разрешение появится, \

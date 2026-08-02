@@ -41,48 +41,29 @@ func render(size: CGFloat) -> Data? {
     ])
     gradient?.draw(in: shape, angle: -90)
 
-    // Микрофон по центру.
+    // Знак: слева вертикальные штрихи речи, справа они ложатся строками
+    // текста. Микрофона нет намеренно — он про начало пути, а иконка
+    // должна показывать превращение: сказал, распозналось, вставилось.
     NSColor.white.setFill()
-    NSColor.white.setStroke()
 
-    let capsuleWidth = size * 0.155
-    let capsule = NSRect(
-        x: size * 0.5 - capsuleWidth / 2,
-        y: size * 0.42,
-        width: capsuleWidth,
-        height: size * 0.30
-    )
-    NSBezierPath(roundedRect: capsule, xRadius: capsuleWidth / 2, yRadius: capsuleWidth / 2).fill()
+    let barWidth = size * 0.052
+    let barGap = size * 0.045
+    let barHeights: [CGFloat] = [0.20, 0.38, 0.28, 0.46]
+    for (index, factor) in barHeights.enumerated() {
+        let x = size * 0.20 + CGFloat(index) * (barWidth + barGap)
+        let height = size * factor
+        let rect = NSRect(x: x, y: size * 0.5 - height / 2, width: barWidth, height: height)
+        NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
+    }
 
-    let arc = NSBezierPath()
-    arc.lineWidth = size * 0.038
-    arc.lineCapStyle = .round
-    arc.appendArc(
-        withCenter: NSPoint(x: size * 0.5, y: size * 0.48),
-        radius: size * 0.145,
-        startAngle: 200,
-        endAngle: 340,
-        clockwise: true
-    )
-    arc.stroke()
-
-    let stemWidth = size * 0.038
-    let stem = NSRect(
-        x: size * 0.5 - stemWidth / 2,
-        y: size * 0.285,
-        width: stemWidth,
-        height: size * 0.06
-    )
-    NSBezierPath(rect: stem).fill()
-
-    let baseWidth = size * 0.185
-    let base = NSRect(
-        x: size * 0.5 - baseWidth / 2,
-        y: size * 0.258,
-        width: baseWidth,
-        height: size * 0.038
-    )
-    NSBezierPath(roundedRect: base, xRadius: size * 0.019, yRadius: size * 0.019).fill()
+    let lineHeight = size * 0.052
+    let lineGap = size * 0.045
+    let lineWidths: [CGFloat] = [0.25, 0.19, 0.23]
+    for (index, factor) in lineWidths.enumerated() {
+        let y = size * 0.5 + (lineHeight + lineGap) - CGFloat(index) * (lineHeight + lineGap) - lineHeight / 2
+        let rect = NSRect(x: size * 0.55, y: y, width: size * factor, height: lineHeight)
+        NSBezierPath(roundedRect: rect, xRadius: lineHeight / 2, yRadius: lineHeight / 2).fill()
+    }
 
     NSGraphicsContext.restoreGraphicsState()
 

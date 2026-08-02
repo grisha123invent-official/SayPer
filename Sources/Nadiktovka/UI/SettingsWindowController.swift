@@ -79,7 +79,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             hosting.topAnchor.constraint(equalTo: chassis.topAnchor)
         ])
 
-        window.title = "Надиктовка"
+        window.title = "SayPer"
         window.titlebarAppearsTransparent = true
         // Без этого система рисует под титлбаром и полосой вкладок
         // разделительную линию, которая режет сплошной фон окна пополам.

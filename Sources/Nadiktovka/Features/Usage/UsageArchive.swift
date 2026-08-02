@@ -35,7 +35,7 @@ struct UsageDay: Codable, Equatable, Identifiable {
     var id: Date { day }
 }
 
-/// Суточные агрегаты на диске: `~/Library/Application Support/Надиктовка/usage.json`.
+/// Суточные агрегаты на диске: `~/Library/Application Support/SayPer/usage.json`.
 ///
 /// Почему агрегаты, а не события: одна запись в день вместо сотни строк —
 /// файл остаётся читаемым глазами, растёт линейно по дням, а не по расшифровкам,

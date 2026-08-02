@@ -1,6 +1,6 @@
 import Foundation
 
-/// Архив истории на диске: `~/Library/Application Support/Надиктовка/history.json`.
+/// Архив истории на диске: `~/Library/Application Support/SayPer/history.json`.
 ///
 /// Единственный файл в приложении, где лежат сами тексты расшифровок
 /// (`AppEvents.swift`, договорённость про `UsageSample`). Поэтому им управляет

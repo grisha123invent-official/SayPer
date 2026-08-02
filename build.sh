@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 EXECUTABLE="Nadiktovka"
-APP_NAME="Надиктовка"
+APP_NAME="SayPer"
 APP_DIR="dist/${APP_NAME}.app"
 BIN="build/${EXECUTABLE}"
 
