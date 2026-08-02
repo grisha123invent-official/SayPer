@@ -453,14 +453,11 @@ struct StatTile: View {
     }
 }
 
-/// Абстрактный фон панели: тёмное поле, светящийся круг звуковой волны и
-/// вертикальные «ламели» — как будто орб рассматривают сквозь рифлёное стекло.
-/// Ламели достигаются честно: орб рисуется в каждой полосе заново с небольшим
-/// вертикальным сдвигом, отсюда характерные изломы контура с референса.
+/// Абстрактный фон окна: тёмное поле и светящийся круг звуковой волны.
 ///
-/// Всё медленно дышит: радиус пульсирует за ~9 секунд (ритм спокойной речи),
-/// сдвиги ламелей плывут за ~26 секунд. При включённом «уменьшении движения»
-/// анимация останавливается на нулевой фазе.
+/// Всё медленно живёт: радиус дышит за ~9 секунд (ритм спокойной речи),
+/// сам орб едва заметно блуждает за ~33 секунды. При включённом
+/// «уменьшении движения» анимация останавливается на нулевой фазе.
 struct AmbientGlow: View {
     @Environment(\.colorScheme) private var scheme
 
@@ -487,29 +484,12 @@ struct AmbientGlow: View {
             : Color(red: 0.93, green: 0.93, blue: 0.97)
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(base))
 
-        let slatCount = 14
-        let slatWidth = size.width / CGFloat(slatCount)
         let breathe = 1 + 0.045 * sin(time * 2 * .pi / 9)
-        let drift = time * 2 * .pi / 26
-
-        for index in 0..<slatCount {
-            let rect = CGRect(
-                x: CGFloat(index) * slatWidth, y: 0,
-                width: slatWidth + 0.5, height: size.height
-            )
-
-            // Копия контекста: клип и сдвиг остаются внутри одной ламели.
-            var slat = context
-            slat.clip(to: Path(rect))
-            slat.translateBy(x: 0, y: sin(drift + Double(index) * 0.8) * 10)
-            drawOrb(into: slat, size: size, scale: breathe, dark: dark)
-
-            // Светлая кромка — граница «стеклянных» полос.
-            context.fill(
-                Path(CGRect(x: rect.minX, y: 0, width: 1, height: size.height)),
-                with: .color(.white.opacity(dark ? 0.05 : 0.12))
-            )
-        }
+        // Медленное блуждание центра: движение видно боковым зрением,
+        // но не отвлекает от текста.
+        let wander = time * 2 * .pi / 33
+        let shift = CGPoint(x: sin(wander) * 9, y: cos(wander * 0.7) * 7)
+        drawOrb(into: context, size: size, scale: breathe, shift: shift, dark: dark)
 
         // Скрим возвращает контраст тексту на карточках поверх яркого центра.
         let scrim = dark ? Color.black.opacity(0.24) : Color.white.opacity(0.22)
@@ -518,8 +498,11 @@ struct AmbientGlow: View {
 
     /// Орб — звуковая волна: тёмное ядро, лавандовое свечение, тёплый отсвет
     /// сверху и расходящиеся кольца-ряби.
-    private func drawOrb(into context: GraphicsContext, size: CGSize, scale: Double, dark: Bool) {
-        let center = CGPoint(x: size.width * 0.5, y: size.height * 0.44)
+    private func drawOrb(into context: GraphicsContext, size: CGSize, scale: Double, shift: CGPoint, dark: Bool) {
+        let center = CGPoint(
+            x: size.width * 0.5 + shift.x,
+            y: size.height * 0.46 + shift.y
+        )
         let radius = min(size.width, size.height) * 0.56 * scale
 
         let body: Gradient

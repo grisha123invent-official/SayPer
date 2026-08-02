@@ -52,6 +52,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         chassis.state = .followsWindowActiveState
         window.contentView = chassis
 
+        // Фон-орб занимает всё окно, включая титлбар и полосу вкладок, —
+        // стеклу капсулы разделов есть что преломлять, глухой полосы сверху нет.
+        let backdrop = NSHostingView(rootView: AmbientGlow())
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        chassis.addSubview(backdrop)
+        NSLayoutConstraint.activate([
+            backdrop.leadingAnchor.constraint(equalTo: chassis.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: chassis.trailingAnchor),
+            backdrop.topAnchor.constraint(equalTo: chassis.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: chassis.bottomAnchor)
+        ])
+
         let hosting = NSHostingView(rootView: SettingsRootView(model: model))
         hosting.translatesAutoresizingMaskIntoConstraints = false
         chassis.addSubview(hosting)
@@ -89,24 +101,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return window
     }
 
-    /// Полоса разделов: L1 в титлбаре, `layoutAttribute = .bottom`, высота 44.
+    /// Полоса разделов в титлбаре, `layoutAttribute = .bottom`, высота 44.
+    /// Подложки у полосы нет: под ней виден фон-орб окна, стеклянная капсула
+    /// вкладок преломляет его сама.
     private func makeTabAccessory() -> NSTitlebarAccessoryViewController {
-        let header = NSVisualEffectView(
-            frame: NSRect(x: 0, y: 0, width: Self.size.width, height: Palette.tabStripHeight)
-        )
-        header.material = .headerView
-        header.blendingMode = .withinWindow
-        header.state = .followsWindowActiveState
-        header.autoresizingMask = [.width]
-
         let strip = NSHostingView(rootView: SettingsTabStrip(model: model))
-        strip.frame = header.bounds
-        strip.autoresizingMask = [.width, .height]
-        header.addSubview(strip)
+        strip.frame = NSRect(x: 0, y: 0, width: Self.size.width, height: Palette.tabStripHeight)
+        strip.autoresizingMask = [.width]
 
         let accessory = NSTitlebarAccessoryViewController()
         accessory.layoutAttribute = .bottom
-        accessory.view = header
+        accessory.view = strip
         return accessory
     }
 
