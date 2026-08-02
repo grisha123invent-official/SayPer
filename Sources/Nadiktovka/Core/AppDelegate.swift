@@ -105,9 +105,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             _ = await AudioRecorder.requestMicrophoneAccess()
-            // Связку ключей трогаем только когда приложение уже поднялось:
-            // системный диалог должно быть кому показать.
-            migrateKeychainIfNeeded()
             checkFirstRun()
         }
     }
@@ -118,15 +115,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recorder.cancel()
     }
 
-    /// Разовая починка доступа к связке ключей после перехода на постоянную
-    /// подпись: один запрос пароля здесь избавляет от запроса при каждом старте.
-    private func migrateKeychainIfNeeded() {
-        let key = "keychainOwnershipFixed"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-
-        Keychain.refreshOwnership()
-        UserDefaults.standard.set(true, forKey: key)
-    }
 
     /// При первом запуске подсказываем, чего не хватает для работы.
     private func checkFirstRun() {
@@ -273,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Универсальный доступ: \(HotkeyMonitor.isTrusted ? "выдан" : "НЕ ВЫДАН")
         Мониторинг ввода: \(HotkeyMonitor.inputMonitoringStatus)
         Микрофон: \(micStatus)
-        API-ключ: \(Settings.shared.apiKey == nil ? "не задан" : "задан")
+        API-ключ: \(Settings.shared.apiKey == nil ? "не задан" : "задан") · \(Keychain.backendDescription)
         Хоткей: \(Settings.shared.hotkey.displayString)
         Вставка: \(Settings.shared.insertMode.title)
 
