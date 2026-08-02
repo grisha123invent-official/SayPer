@@ -20,6 +20,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var lastText: String?
     private var isBusy = false
+    /// Громкость для значка в строке меню. Отдельно от индикатора: там кадры
+    /// идут по тридцать раз в секунду, а значок перерисовывается вчетверо реже —
+    /// в строке меню такой частоты глазу хватает, а работы вчетверо меньше.
+    private var statusLevel: Float = 0
+    private var lastStatusLevelDraw = Date.distantPast
     private var transcription: Task<Void, Never>?
     private var elapsedTimer: Timer?
 
@@ -64,7 +69,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderStatusItem()
 
         recorder.onLevel = { [weak self] level in
-            self?.indicator.update(level: level)
+            guard let self else { return }
+            self.indicator.update(level: level)
+            self.updateStatusLevel(level)
         }
 
         gate.onCommand = { [weak self] command in
@@ -136,6 +143,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recorder.cancel()
     }
 
+
+    /// Перерисовка значка под громкость — не чаще восьми раз в секунду.
+    private func updateStatusLevel(_ level: Float) {
+        guard case .recording = status else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastStatusLevelDraw) > 0.12 else { return }
+        lastStatusLevelDraw = now
+        statusLevel = level
+        renderStatusItem()
+    }
 
     /// Первый запуск: мастер вместо череды системных алертов.
     @MainActor
@@ -211,16 +228,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func renderStatusItem() {
         guard let button = statusItem.button else { return }
 
-        let symbol: String
+        // Свой знак вместо системного микрофона: в строке меню у соседей
+        // тоже микрофоны и волны, приложение должно узнаваться.
         switch status {
-        case .idle: symbol = "mic"
-        case .recording: symbol = "mic.fill"
-        case .transcribing: symbol = "waveform"
-        case .failed: symbol = "exclamationmark.triangle"
+        case .idle: button.image = StatusItemIcon.idle()
+        case .recording: button.image = StatusItemIcon.recording(level: statusLevel)
+        case .transcribing: button.image = StatusItemIcon.transcribing()
+        case .failed: button.image = StatusItemIcon.idle()
         }
+        button.image?.accessibilityDescription = "SayPer"
 
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "SayPer")
-        button.image?.isTemplate = true
         button.contentTintColor = {
             switch status {
             case .recording: return .systemRed
