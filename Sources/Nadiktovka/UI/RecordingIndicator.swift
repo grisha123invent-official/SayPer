@@ -6,7 +6,12 @@ import SwiftUI
 ///
 /// Окно остаётся AppKit — нужна панель, которая висит поверх всего, не
 /// перехватывает мышь и не забирает фокус у того приложения, куда человек
-/// сейчас диктует. Содержимое — SwiftUI на родном стекле macOS 26.
+/// сейчас диктует.
+///
+/// Стекло — `NSVisualEffectView` с `.behindWindow`, а не `glassEffect` из
+/// SwiftUI. Пилюля висит в прозрачном окне: внутри окна под ней нет ничего,
+/// и SwiftUI-стекло преломляло пустоту, выдавая серую плашку. Преломлять
+/// нужно то, что за окном, — чужое приложение, в которое человек диктует.
 final class RecordingIndicator {
     enum State: Equatable {
         case recording
@@ -16,6 +21,7 @@ final class RecordingIndicator {
 
     private let model = IndicatorModel()
     private var panel: NSPanel?
+    private var glass: NSVisualEffectView?
     private var hideTimer: Timer?
 
     // MARK: - Публичный интерфейс
@@ -87,11 +93,38 @@ final class RecordingIndicator {
     // MARK: - Окно
 
     private func makePanel() -> NSPanel {
-        let frame = NSRect(x: 0, y: 0, width: IndicatorMetrics.minWidth, height: IndicatorMetrics.height)
+        let bleed = IndicatorMetrics.bleed
+        let frame = NSRect(
+            x: 0, y: 0,
+            width: IndicatorMetrics.minWidth + bleed * 2,
+            height: IndicatorMetrics.height + bleed * 2
+        )
 
-        let hosting = NSHostingView(rootView: IndicatorView(model: model))
-        hosting.frame = frame
-        hosting.autoresizingMask = [.width, .height]
+        let container = NSView(frame: frame)
+        container.autoresizingMask = [.width, .height]
+
+        // Порядок добавления — порядок слоёв. Свечение уходит под стекло,
+        // чтобы оно его преломляло, а обводка и текст ложатся поверх.
+        let halo = NSHostingView(rootView: IndicatorHalo(model: model))
+        halo.frame = frame
+        halo.autoresizingMask = [.width, .height]
+        container.addSubview(halo)
+
+        let glass = NSVisualEffectView(frame: frame.insetBy(dx: bleed, dy: bleed))
+        glass.material = .hudWindow
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.wantsLayer = true
+        glass.layer?.cornerRadius = IndicatorMetrics.height / 2
+        glass.layer?.masksToBounds = true
+        glass.autoresizingMask = [.width, .height]
+        container.addSubview(glass)
+        self.glass = glass
+
+        let content = NSHostingView(rootView: IndicatorView(model: model))
+        content.frame = frame
+        content.autoresizingMask = [.width, .height]
+        container.addSubview(content)
 
         let panel = NSPanel(
             contentRect: frame,
@@ -99,7 +132,7 @@ final class RecordingIndicator {
             backing: .buffered,
             defer: false
         )
-        panel.contentView = hosting
+        panel.contentView = container
         panel.isOpaque = false
         panel.backgroundColor = .clear
         // Тень рисует само стекло; своя добавила бы вторую кромку.
@@ -119,7 +152,7 @@ final class RecordingIndicator {
     }
 
     private func resize(_ panel: NSPanel, animated: Bool) {
-        let width = IndicatorMetrics.width(for: model)
+        let width = IndicatorMetrics.width(for: model) + IndicatorMetrics.bleed * 2
         guard abs(width - panel.frame.width) > 1 else { return }
 
         var frame = panel.frame
@@ -143,7 +176,9 @@ final class RecordingIndicator {
         let visible = screen.visibleFrame
         panel.setFrameOrigin(NSPoint(
             x: visible.midX - size.width / 2,
-            y: visible.minY + 96
+            // Минус припуск: сама пилюля должна остаться там же, где была,
+            // а выросло вокруг неё только поле для свечения.
+            y: visible.minY + 96 - IndicatorMetrics.bleed
         ))
     }
 }
@@ -188,8 +223,23 @@ private final class IndicatorModel: ObservableObject {
     var tint: Color {
         switch state {
         case .recording: return Color(red: 0.40, green: 0.68, blue: 1.0)
-        case .transcribing: return Color(red: 0.62, green: 0.52, blue: 1.0)
+        case .transcribing: return Palette.accent
         case .error: return Color(red: 1.0, green: 0.60, blue: 0.40)
+        }
+    }
+
+    /// На ошибке всё замирает: мигающая ошибка читается хуже неподвижной.
+    var isStatic: Bool {
+        if case .error = state { return true }
+        return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Градусов в секунду для бегущей по контуру искры.
+    var runnerSpeed: Double {
+        switch state {
+        case .recording: return 55 + Double(min(level, 1)) * 120
+        case .transcribing: return 130
+        case .error: return 0
         }
     }
 }
@@ -197,14 +247,18 @@ private final class IndicatorModel: ObservableObject {
 // MARK: - Размеры
 
 private enum IndicatorMetrics {
-    static let height: CGFloat = 38
-    static let minWidth: CGFloat = 120
-    static let maxWidth: CGFloat = 360
-    static let padding: CGFloat = 13
-    static let gap: CGFloat = 9
+    static let height: CGFloat = 30
+    static let minWidth: CGFloat = 104
+    static let maxWidth: CGFloat = 320
+    static let padding: CGFloat = 11
+    static let gap: CGFloat = 8
     static let barCount = 5
-    static let barWidth: CGFloat = 2.5
-    static let barSpacing: CGFloat = 3.5
+    static let barWidth: CGFloat = 2
+    static let barSpacing: CGFloat = 3
+    /// Поле вокруг пилюли под свечение: окно больше самой капсулы на столько
+    /// с каждой стороны.
+    static let bleed: CGFloat = 14
+    static let font = NSFont.systemFont(ofSize: 11, weight: .medium)
 
     static var barsWidth: CGFloat {
         CGFloat(barCount) * (barWidth + barSpacing) - barSpacing
@@ -213,12 +267,44 @@ private enum IndicatorMetrics {
     /// Ширина считается по тексту заранее: панель AppKit должна знать размер
     /// до того, как SwiftUI отрисует содержимое.
     static func width(for model: IndicatorModel) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         let text = (model.title as NSString)
             .size(withAttributes: [.font: font])
             .width
         let total = padding + barsWidth + gap + ceil(text) + padding
         return max(minWidth, min(total, maxWidth))
+    }
+}
+
+// MARK: - Свечение под стеклом
+
+/// Мягкий ореол в цвет состояния. Лежит под стеклом, поэтому стекло его
+/// размывает и подкрашивается им изнутри — тонировать стекло отдельно не надо.
+private struct IndicatorHalo: View {
+    @ObservedObject var model: IndicatorModel
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: model.isStatic)) { timeline in
+            let t = model.isStatic ? 0 : timeline.date.timeIntervalSinceReferenceDate
+            Capsule()
+                .fill(model.tint)
+                .padding(IndicatorMetrics.bleed)
+                .blur(radius: 13)
+                .opacity(opacity(at: t))
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Во время записи ореол дышит по громкости — свет отзывается на голос,
+    /// а не живёт своим ритмом. При расшифровке дыхание ровное.
+    private func opacity(at time: TimeInterval) -> Double {
+        switch model.state {
+        case .recording:
+            return 0.45 + Double(min(model.level, 1)) * 0.45
+        case .transcribing:
+            return 0.55 + 0.22 * sin(time * 2 * .pi / 2.4)
+        case .error:
+            return 0.60
+        }
     }
 }
 
@@ -229,20 +315,20 @@ private struct IndicatorView: View {
     @State private var appeared = false
 
     var body: some View {
-        HStack(spacing: IndicatorMetrics.gap) {
-            Equalizer(level: model.level, state: model.state, tint: model.tint)
-                .frame(width: IndicatorMetrics.barsWidth, height: IndicatorMetrics.height - 18)
+        ZStack {
+            rim
+            HStack(spacing: IndicatorMetrics.gap) {
+                Equalizer(level: model.level, state: model.state, tint: model.tint)
+                    .frame(width: IndicatorMetrics.barsWidth, height: 12)
 
-            Text(model.title)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
+                Text(model.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, IndicatorMetrics.padding)
         }
-        .padding(.horizontal, IndicatorMetrics.padding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Родное стекло macOS: подкрашивается под состояние и само добавляет
-        // контраст под подписью, поэтому цвет текста остаётся системным.
-        .glassEffect(.regular.tint(model.tint.opacity(0.22)), in: Capsule())
+        .padding(IndicatorMetrics.bleed)
         .scaleEffect(appeared ? 1 : 0.92)
         .animation(.spring(response: 0.28, dampingFraction: 0.7), value: appeared)
         .onAppear { appeared = true }
@@ -250,6 +336,68 @@ private struct IndicatorView: View {
             appeared = false
             DispatchQueue.main.async { appeared = true }
         }
+    }
+
+    /// Кромка капсулы: ровный светлый волосок плюс две искры, бегущие по нему
+    /// навстречу друг другу. Скорость искр зависит от состояния — во время
+    /// записи она растёт с громкостью, и контур отзывается на голос.
+    private var rim: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: model.isStatic)) { timeline in
+            let t = model.isStatic ? 0 : timeline.date.timeIntervalSinceReferenceDate
+            // Доля пути, а не угол: `trim` идёт по длине контура, поэтому искра
+            // проходит прямые участки и закругления с одной скоростью.
+            // Угловой градиент так не умеет — на вытянутой капсуле он летел
+            // по бокам и полз на торцах.
+            let progress = (t * model.runnerSpeed / 360).truncatingRemainder(dividingBy: 1)
+
+            ZStack {
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+
+                if !model.isStatic {
+                    runner(at: progress)
+                    runner(at: progress + 0.5)
+                }
+            }
+        }
+    }
+
+    /// Искра с хвостом: три дуги от длинной тусклой к короткой яркой.
+    /// Градиент вдоль обрезанного контура SwiftUI не рисует, а наложение
+    /// трёх дуг даёт тот же комет-эффект без своей геометрии.
+    private func runner(at progress: Double) -> some View {
+        ZStack {
+            arc(from: progress - 0.16, to: progress, color: model.tint.opacity(0.22), width: 1.4, blur: 1.6)
+            arc(from: progress - 0.06, to: progress, color: model.tint.opacity(0.70), width: 1.4, blur: 0.9)
+            arc(from: progress - 0.015, to: progress, color: .white.opacity(0.95), width: 1.5, blur: 0.5)
+        }
+    }
+
+    private func arc(from: Double, to: Double, color: Color, width: CGFloat, blur: CGFloat) -> some View {
+        // `trim` не умеет через ноль: дуга, начавшаяся до конца контура,
+        // рисуется двумя кусками — хвостом в конце и головой в начале.
+        let head = to.truncatingRemainder(dividingBy: 1)
+        let tail = from < 0 ? from + 1 : from
+
+        return ZStack {
+            if tail > head {
+                segment(tail, 1, color, width, blur)
+                segment(0, head, color, width, blur)
+            } else {
+                segment(tail, head, color, width, blur)
+            }
+        }
+    }
+
+    private func segment(_ from: Double, _ to: Double, _ color: Color,
+                         _ width: CGFloat, _ blur: CGFloat) -> some View {
+        Capsule()
+            .inset(by: width / 2)
+            .trim(from: from, to: to)
+            .stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round))
+            // Небольшое размытие превращает штрих в свечение: резкая линия
+            // на матовом стекле выглядит наклейкой.
+            .blur(radius: blur)
     }
 }
 
@@ -268,7 +416,7 @@ private struct Equalizer: View {
                 let spacing = IndicatorMetrics.barSpacing
 
                 for index in 0..<IndicatorMetrics.barCount {
-                    let height = max(5, size.height * wave(index: index, phase: phase))
+                    let height = max(4, size.height * wave(index: index, phase: phase))
                     let rect = CGRect(
                         x: CGFloat(index) * (barWidth + spacing),
                         y: (size.height - height) / 2,

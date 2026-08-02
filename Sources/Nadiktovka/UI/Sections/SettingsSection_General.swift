@@ -58,7 +58,6 @@ struct SettingsSectionGeneral: View {
     private var duringRecording: some View {
         GlassCard("Во время записи") {
             SwitchToggle("Показывать индикатор", isOn: $model.showIndicator)
-            SwitchToggle("Звуковые сигналы", isOn: $model.playSounds)
 
             SettingRow(
                 "Звук компьютера",
@@ -79,6 +78,9 @@ struct SettingsSectionGeneral: View {
                     HStack(spacing: Palette.spaceSm) {
                         Slider(value: $duckLevel, in: 0.05...0.9)
                             .frame(width: 170)
+                            // Системный синий здесь спорил с выбранным акцентом:
+                            // единственный элемент окна, живущий своим цветом.
+                            .tint(Palette.accent)
                         Text("\(Int((duckLevel * 100).rounded()))%")
                             .font(.body.monospacedDigit())
                             .foregroundStyle(.secondary)

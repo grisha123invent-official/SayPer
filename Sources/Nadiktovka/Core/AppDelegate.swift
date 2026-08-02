@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeys.onBecameActive = { [weak self] in
             guard let self else { return }
             self.status = .idle
-            self.play("Glass")
+            Sounds.play(.done)
             Log.write("Перехват заработал, готов к диктовке")
         }
         hotkeys.start()
@@ -381,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             status = .recording
             indicator.setHint(gate.currentHint)
             indicator.show(.recording)
-            play("Tink")
+            Sounds.play(.start)
             Log.write("Запись пошла")
         } catch {
             gate.recordingDidStop()
@@ -419,7 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.write("Запись закончена: \(String(format: "%.2f", result.duration)) с, \(size) байт "
                   + "→ отправляю в \(Settings.shared.model.rawValue)")
 
-        play("Pop")
+        Sounds.play(.stop)
         status = .transcribing
         indicator.show(.transcribing)
         isBusy = true
@@ -449,7 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 indicator.hide()
                 status = .idle
                 TextInserter.deliver(text, mode: insertMode)
-                play("Purr")
+                Sounds.play(.done)
 
                 TranscriptionBus.publish(TranscriptionRecord(
                     text: text,
@@ -528,7 +528,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.write("ОШИБКА: \(message)")
         status = .failed(message)
         indicator.show(.error(shortMessage(message)))
-        play("Basso")
+        Sounds.play(.error)
 
         // Через несколько секунд возвращаем обычный вид иконки.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -537,11 +537,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.status = .idle
             }
         }
-    }
-
-    private func play(_ name: String) {
-        guard Settings.shared.playSounds else { return }
-        NSSound(named: name)?.play()
     }
 }
 

@@ -14,6 +14,7 @@ struct SettingsSectionCustomization: View {
         SectionScaffold {
             colors
             theme
+            SoundsCard()
         }
     }
 
@@ -78,6 +79,83 @@ struct SettingsSectionCustomization: View {
             .accessibilityLabel(theme.title)
             .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         }
+    }
+}
+
+/// Карточка «Звуки»: громкость и что именно звучит.
+///
+/// Поштучно, а не одним выключателем: сигнал старта нужен почти всем — без
+/// него не понять, что запись пошла, — а «текст вставлен» многих раздражает,
+/// потому что результат и так виден в поле.
+private struct SoundsCard: View {
+    @State private var enabled = Settings.shared.playSounds
+    @State private var volume = Settings.shared.soundVolume
+    @State private var events: [SoundEvent: Bool] = Dictionary(
+        uniqueKeysWithValues: SoundEvent.allCases.map { ($0, Settings.shared.isSoundEnabled($0)) }
+    )
+
+    var body: some View {
+        GlassCard("Звуки") {
+            SwitchToggle("Звуковые сигналы", isOn: $enabled)
+                .onChange(of: enabled) { _, newValue in
+                    Settings.shared.playSounds = newValue
+                }
+
+            SettingRow("Громкость") {
+                HStack(spacing: Palette.spaceXs) {
+                    Slider(value: $volume, in: 0...1)
+                        .controlSize(.small)
+                        .frame(width: 180)
+                        .tint(Palette.accent)
+                    Text("\(Int(volume * 100))%")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
+                }
+            }
+            // Послушать громкость можно кнопкой у любого сигнала ниже:
+            // крутить ручку вслепую — гадание.
+            .onChange(of: volume) { _, newValue in
+                Settings.shared.soundVolume = newValue
+            }
+
+            CardDivider()
+
+            ForEach(SoundEvent.allCases) { event in
+                SettingRow(event.title, subtitle: event.subtitle) {
+                    HStack(spacing: Palette.spaceXs) {
+                        Button {
+                            Sounds.preview(event)
+                        } label: {
+                            Image(systemName: "play.circle")
+                                .font(.system(size: 15))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Послушать")
+
+                        Toggle("", isOn: binding(for: event))
+                            .toggleStyle(GlassSwitchStyle())
+                            .labelsHidden()
+                    }
+                }
+            }
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.45)
+        }
+    }
+
+    private func binding(for event: SoundEvent) -> Binding<Bool> {
+        Binding(
+            get: { events[event] ?? true },
+            set: { newValue in
+                events[event] = newValue
+                Settings.shared.setSound(newValue, for: event)
+            }
+        )
     }
 }
 
