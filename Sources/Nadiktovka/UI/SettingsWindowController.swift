@@ -68,22 +68,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hosting.translatesAutoresizingMaskIntoConstraints = false
         chassis.addSubview(hosting)
 
-        // `contentLayoutGuide` уже учитывает титлбар вместе с аксессуаром,
-        // поэтому панель раздела встаёт ровно под полосу вкладок.
-        let layoutGuide = window.contentLayoutGuide as? NSLayoutGuide
+        // Содержимое занимает окно целиком, включая зону титлбара: полоса
+        // разделов теперь часть корневого вида, а не аксессуар титлбара.
+        // Аксессуар система подчёркивала разделительной линией, и убрать её
+        // через titlebarSeparatorStyle не получалось — линия рвала фон надвое.
         NSLayoutConstraint.activate([
             hosting.leadingAnchor.constraint(equalTo: chassis.leadingAnchor),
             hosting.trailingAnchor.constraint(equalTo: chassis.trailingAnchor),
             hosting.bottomAnchor.constraint(equalTo: chassis.bottomAnchor),
-            hosting.topAnchor.constraint(
-                equalTo: layoutGuide?.topAnchor ?? chassis.topAnchor
-            )
+            hosting.topAnchor.constraint(equalTo: chassis.topAnchor)
         ])
-
-        window.addTitlebarAccessoryViewController(makeTabAccessory())
 
         window.title = "Надиктовка"
         window.titlebarAppearsTransparent = true
+        // Без этого система рисует под титлбаром и полосой вкладок
+        // разделительную линию, которая режет сплошной фон окна пополам.
+        window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.backgroundColor = .clear
         window.isReleasedWhenClosed = false
@@ -100,19 +100,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return window
     }
 
-    /// Полоса разделов в титлбаре, `layoutAttribute = .bottom`, высота 44.
-    /// Подложки у полосы нет: под ней виден фон-орб окна, стеклянная капсула
-    /// вкладок преломляет его сама.
-    private func makeTabAccessory() -> NSTitlebarAccessoryViewController {
-        let strip = NSHostingView(rootView: SettingsTabStrip(model: model))
-        strip.frame = NSRect(x: 0, y: 0, width: Self.size.width, height: Palette.tabStripHeight)
-        strip.autoresizingMask = [.width]
-
-        let accessory = NSTitlebarAccessoryViewController()
-        accessory.layoutAttribute = .bottom
-        accessory.view = strip
-        return accessory
-    }
 
     // MARK: - ⌘1…⌘5
 

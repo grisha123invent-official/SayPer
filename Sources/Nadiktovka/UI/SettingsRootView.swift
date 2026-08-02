@@ -2,21 +2,18 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Панель раздела: подложка L2, баннер доступа и сам раздел.
+/// Окно раздела целиком: полоса вкладок, баннер доступа и сам раздел.
 ///
-/// Полосы вкладок здесь нет намеренно — она живёт в титлбаре
-/// (`SettingsTabStrip` внутри `NSTitlebarAccessoryViewController`, см. `ia.md` §1),
-/// а этот вид отвечает только за содержимое под ней.
+/// Полоса вкладок лежит здесь, а не в `NSTitlebarAccessoryViewController`:
+/// под аксессуаром система рисует разделительную линию, которая режет
+/// сплошной фон окна надвое, и `titlebarSeparatorStyle` её не убирает.
 struct SettingsRootView: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
         VStack(spacing: 0) {
-            // Волосок между полосой разделов и контентом: без него подложка
-            // панели в светлой теме сливается с материалом титлбара.
-            Rectangle()
-                .fill(Palette.hairline)
-                .frame(height: 1)
+            SettingsTabStrip(model: model)
+                .frame(height: Palette.tabStripHeight)
 
             VStack(spacing: 0) {
                 if !model.accessibilityGranted {
