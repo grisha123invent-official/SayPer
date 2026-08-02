@@ -390,11 +390,11 @@ struct SwitchToggle: View {
 /// ней, включённое состояние подкрашивается акцентом. Системный `.switch`
 /// рисует плоскую заливку и рядом со стеклянным окном смотрится чужеродно.
 struct GlassSwitchStyle: ToggleStyle {
-    private let trackWidth: CGFloat = 48
-    private let trackHeight: CGFloat = 22
+    private let trackWidth: CGFloat = 43
+    private let trackHeight: CGFloat = 20
     /// Линза крупнее дорожки и свешивается за её края — как в референсе,
     /// где стеклянный кругляш «сидит» поверх синей полосы, а не внутри неё.
-    private var knobSize: CGFloat { trackHeight + 6 }
+    private var knobSize: CGFloat { trackHeight + 5 }
 
     func makeBody(configuration: Configuration) -> some View {
         HStack {
