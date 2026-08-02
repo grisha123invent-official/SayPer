@@ -114,3 +114,70 @@ struct AmbientGlow: View {
         }
     }
 }
+
+/// Фон панели строки меню: два мягких свечения — сверху и снизу.
+///
+/// Орб из окна сюда не годится: панель узкая и высокая, его кольцо ложится
+/// ровно на список расшифровок, а растянутый до низа орб превращается
+/// в общую засветку. Два компактных пятна дают свет там, где он нужен
+/// стеклу — у шапки и у кнопок, — оставляя середину спокойной.
+struct PanelGlow: View {
+    @Environment(\.colorScheme) private var scheme
+
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { timeline in
+            Canvas { context, size in
+                let t = reduceMotion ? 47 : timeline.date.timeIntervalSinceReferenceDate
+                draw(&context, size: size, t: t)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    private func draw(_ context: inout GraphicsContext, size: CGSize, t: Double) {
+        let dark = scheme == .dark
+        context.fill(
+            Path(CGRect(origin: .zero, size: size)),
+            with: .color(dark ? Color(red: 0.035, green: 0.03, blue: 0.07)
+                              : Color(red: 0.95, green: 0.95, blue: 0.98))
+        )
+
+        // Верхнее пятно — под шапкой, нижнее — под кнопками. Дышат в
+        // противофазе, поэтому свет медленно перетекает сверху вниз.
+        let breatheTop = 1 + 0.10 * sin(t * 2 * .pi / 11)
+        let breatheBottom = 1 + 0.10 * sin(t * 2 * .pi / 11 + .pi)
+
+        blob(&context, size: size,
+             center: CGPoint(x: size.width * 0.30, y: size.height * 0.06),
+             radius: size.width * 0.85 * breatheTop,
+             color: dark ? Color(red: 0.42, green: 0.34, blue: 0.86)
+                         : Color(red: 0.62, green: 0.58, blue: 0.95),
+             alpha: dark ? 0.40 : 0.34)
+
+        blob(&context, size: size,
+             center: CGPoint(x: size.width * 0.74, y: size.height * 1.02),
+             radius: size.width * 0.80 * breatheBottom,
+             color: dark ? Color(red: 0.30, green: 0.38, blue: 0.88)
+                         : Color(red: 0.58, green: 0.68, blue: 0.98),
+             alpha: dark ? 0.34 : 0.30)
+    }
+
+    private func blob(_ context: inout GraphicsContext, size: CGSize,
+                      center: CGPoint, radius: CGFloat, color: Color, alpha: Double) {
+        let gradient = Gradient(stops: [
+            .init(color: color.opacity(alpha), location: 0),
+            .init(color: color.opacity(alpha * 0.35), location: 0.45),
+            .init(color: .clear, location: 1)
+        ])
+        context.fill(
+            Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
+                                   width: radius * 2, height: radius * 2)),
+            with: .radialGradient(gradient, center: center, startRadius: 0, endRadius: radius)
+        )
+    }
+}
