@@ -447,7 +447,8 @@ private struct StatusPanelView: View {
                     options: HotkeyActivation.allCases,
                     compact: true
                 ) { $0.title }
-                .frame(width: 168)
+                // 168 не хватало: «Нажал-нажал» обрезался многоточием.
+                .frame(width: 196)
             }
 
             HStack(spacing: 8) {
@@ -486,7 +487,10 @@ private struct StatusPanelView: View {
         Button(action: run) {
             VStack(spacing: 3) {
                 Image(systemName: symbol)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
+                    // Символы разной высоты (стетоскоп выше шестерёнки)
+                    // разгоняли кнопки по высоте — фиксируем зону иконки.
+                    .frame(height: 14)
                 Text(title)
                     .font(.system(size: 10))
             }
