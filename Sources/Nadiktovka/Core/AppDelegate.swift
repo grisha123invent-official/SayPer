@@ -317,6 +317,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let report = """
+        Версия: \(AppInfo.versionLine)
+
         Перехват клавиатуры: \(hotkeys.isActive ? "работает" : "НЕ РАБОТАЕТ")
         Универсальный доступ: \(HotkeyMonitor.isTrusted ? "выдан" : "НЕ ВЫДАН")
         Мониторинг ввода: \(HotkeyMonitor.inputMonitoringStatus)

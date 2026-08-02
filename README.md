@@ -1,165 +1,86 @@
 # SayPer
 
-Диктовка голосом для macOS. Зажал горячую клавишу → говоришь → отпустил → текст
-появляется в том поле, где стоит курсор. Расшифровка — OpenAI Whisper.
+**English** · [Русский](README.ru.md)
 
-Живёт в строке меню, окна нет, в Dock не висит.
+Hold a key, speak, release — the text lands wherever your cursor is.
 
-## Сборка и установка
+A menu-bar dictation app for macOS. It records your voice, sends it to OpenAI Whisper, and inserts the result into whatever app you were typing in. No window, no Dock icon.
 
-```bash
-./build.sh install
-```
+<img src="docs/pill.png" width="480" alt="Recording indicator">
 
-Соберёт, положит в `/Applications/SayPer.app` и запустит. Нужны только
-Command Line Tools (`xcode-select --install`), Xcode не требуется.
+> **The interface is in Russian only.** Every label, menu and prompt inside the app is Russian; an English localisation isn't done yet. Transcription itself works in any language Whisper supports.
 
-Без аргумента `install` собирает в `dist/` и ничего не трогает в системе.
+## Requirements
 
-## Первый запуск
+- **macOS 26 or later.** Built against the macOS 26 SDK and uses APIs that don't exist on earlier versions.
+- **Apple Silicon.** The build is arm64 only; Intel Macs are not supported.
+- **Your own OpenAI API key.** Transcription runs about $0.006 per minute of speech — roughly 36 cents per hour of dictation — billed by OpenAI directly to you.
 
-1. **Универсальный доступ.** Приложение попросит его сразу. Системные настройки →
-   Конфиденциальность и безопасность → Универсальный доступ → включить «SayPer».
-   Без него не видно горячей клавиши и нельзя вставлять текст.
-   **После выдачи разрешения приложение нужно перезапустить.**
-2. **Микрофон.** Запрос появится при первой записи.
-3. **API-ключ.** Меню в строке статуса → «Настройки…» → поле «API-ключ».
-   Ключ берётся на platform.openai.com, хранится в связке ключей macOS.
+## Install
 
-## Как пользоваться
+1. Download the `.dmg` from [Releases](https://github.com/grisha123invent-official/SayPer/releases).
+2. **Drag SayPer into Applications.** Don't run it from the disk image or from Downloads: macOS launches apps in those locations from a read-only random folder, and the permissions you grant won't survive a restart.
+3. **The first launch will be blocked.** The app is signed, but not notarised by Apple — that requires a paid Developer Program membership. Open **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway**.
 
-Зажми **правый ⌥ Option**, говори, отпусти. Пока клавиша зажата — внизу экрана
-видна пилюля с индикатором громкости. После отпускания текст расшифровывается
-и вставляется в активное поле.
+<img src="docs/install.png" width="560" alt="Install window">
 
-Сочетание меняется в настройках: кликни по полю и зажми что хочешь. Работают
-одиночные модификаторы (правый ⌥), их комбинации (⌃⌥) и связки с обычной
-клавишей (⌃⌥D). Левые и правые клавиши различаются.
+Control-clicking the app and choosing "Open" no longer works; Apple removed that shortcut in recent macOS versions. System Settings is the only route.
 
-Если хоткей состоит только из модификаторов и во время удержания нажать обычную
-клавишу, запись отменяется — так обычные шорткаты продолжают работать. Если в
-сочетание входит обычная клавиша, она перехватывается и в других приложениях
-не печатается.
+## First run
 
-**Esc** прерывает что угодно: и запись, и ожидание ответа от OpenAI.
+A short wizard walks through everything it needs:
 
-### Два режима активации
+- **Microphone** — nothing to record without it.
+- **Accessibility** and **Input Monitoring** — two separate permissions, both required. The first lets the app paste text into other apps; the second lets it see your hotkey while you're working elsewhere. macOS doesn't let an app grant these to itself, so you flip the switches in System Settings — and the wizard notices the moment you do. No restart, no "I've done it" button.
+- **OpenAI key** — create one at [platform.openai.com](https://platform.openai.com/api-keys). It's shown once, so copy it right away.
 
-- **Удержание** — держишь клавишу, пока говоришь. По умолчанию.
-- **Нажал-нажал** — первое нажатие начинает запись, второе завершает. Удобно для
-  длинных диктовок, когда не хочется держать палец на клавише. Забытая запись
-  останавливается сама через 5 минут, и её текст кладётся в буфер, а не печатается
-  в случайное поле.
+## Use
 
-Режим переключается в разделе «Диктовка» и в панели строки статуса.
+Hold your hotkey, speak, let go. The text appears where the cursor is.
 
-## Настройки
+- **Esc** cancels — an ongoing recording, or a transcription you've stopped waiting for.
+- Don't like holding the key? Switch to **press-to-start, press-to-stop** in Settings → Диктовка.
+- Any combination works, including bare modifiers. Left and right keys are told apart.
+- If your hotkey is modifiers only, pressing a regular key during a recording cancels it — so your normal shortcuts keep working.
 
-Три раздела, ⌘1…⌘3 для переключения.
+## What else it does
 
-| Раздел | Что внутри |
-|---|---|
-| Диктовка | сочетание, режим активации, индикатор, звуки, приглушение звука компьютера, модель, язык, словарь, причёсывание, способ вставки |
-| История | последние 20 расшифровок: скопировать, вставить снова, удалить |
-| Ключ и расходы | статистика и график трат, API-ключ, доступ к клавиатуре, диагностика, автозапуск |
+<img src="docs/settings.png" width="560" alt="Settings">
 
-Секции внутри «Диктовки» идут по ходу дела: чем запускается запись → что видно,
-пока говоришь → как распознаётся → куда попадает текст.
+- **History** of everything transcribed, kept locally. Copy or re-insert any entry.
+- **Spending** — the app estimates what you've spent with OpenAI, by day and by month.
+- **Audio ducking** — music and video leak into the microphone and ruin transcription, so system audio is quieted or muted while recording, then restored.
+- **Vocabulary** — names and terms you feed it get recognised more reliably.
+- **Cleanup** — an optional second pass that fixes punctuation and strips filler words.
+- **Appearance** — six accent colours, light/dark/system theme, per-event sounds with a volume slider.
 
-Способ вставки стоит сменить на «посимвольно», если какое-то приложение не
-реагирует на программный ⌘V.
+## Privacy
 
-### История и приватность
+- Audio goes to **OpenAI** and nowhere else. It's sent only while transcribing and isn't kept on disk.
+- Your API key stays on your Mac — in the Keychain, or in a `0600` file under Application Support when the Keychain isn't available to a locally-signed app.
+- History and spending are stored locally, under `~/Library/Application Support/SayPer`.
+- No telemetry, no analytics, no crash reporting, no server of ours.
 
-Расшифровки хранятся в `~/Library/Application Support/SayPer/history.json`
-с правами `0600`. Хранение выключается переключателем в разделе «История»,
-кнопка «Очистить историю» удаляет и список, и файл. Статистика расходов пишется
-отдельно и текстов не содержит — только длительность, число слов и модель.
+If sending audio to OpenAI is unacceptable for you, `Transcriber` is a single file and can be pointed at a local `whisper.cpp` instead.
 
-Стоимость считается оценкой по тарифам моделей: при `response_format: text`
-OpenAI не возвращает фактический расход токенов.
+## Updating
 
-## Устройство
+There's no auto-update yet. New versions appear as releases here — download and replace.
 
-Идентификатор приложения и папка исходников остались прежними
-(`com.grisha.nadiktovka`, `Sources/Nadiktovka`): к идентификатору привязаны
-разрешения на клавиатуру, автозапуск и запись в связке ключей — смена сбросила бы
-всё это. Пользователь идентификатора не видит, поэтому менять его смысла нет.
+Permissions survive updates: every build is signed with the same certificate.
 
-Исходники разложены по папкам внутри `Sources/Nadiktovka`; `build.sh` обходит
-дерево целиком, так что новый файл достаточно положить в нужную папку.
+## Build from source
 
-| Файл | Что делает |
-|---|---|
-| `Core/AppDelegate.swift` | состояния, оркестровка записи, склейка всего вместе |
-| `Core/Settings.swift` | настройки в UserDefaults и типизированный доступ к ним |
-| `Core/AppEvents.swift` | `TranscriptionRecord` и шина, по которой уходит готовая расшифровка |
-| `Core/AppPaths.swift` | папка `~/Library/Application Support/SayPer` |
-| `Core/Keychain.swift` | хранение API-ключа |
-| `Core/LaunchAtLogin.swift` | автозапуск через `SMAppService` |
-| `Hotkey/HotkeyMonitor.swift` | глобальное отслеживание нажатия/отпускания модификатора |
-| `Audio/AudioRecorder.swift` | AVAudioEngine → 16 kHz mono AAC + уровень громкости |
-| `Audio/Transcriber.swift` | `/v1/audio/transcriptions` и необязательная чистка текста |
-| `Audio/TextInserter.swift` | ⌘V через CGEvent либо посимвольный ввод юникода |
-| `UI/RecordingIndicator.swift` | плавающая пилюля с эквалайзером |
-| `UI/DesignSystem.swift` | токены и общие кирпичики окна настроек |
-| `UI/SettingsRootView.swift` | окно настроек: полоса разделов и панель раздела |
-| `UI/Sections/` | по файлу на раздел настроек |
-| `Features/Recording/RecordingGate.swift` | режим активации: события хоткея → команды записи |
-| `Features/StatusMenu/StatusMenuBuilder.swift` | меню в строке статуса |
-| `Features/History/HistoryStore.swift` | последние расшифровки |
-| `Features/Usage/UsageStore.swift` | минуты, слова и оценка стоимости |
-| `Tools/MakeIcon.swift` | генерация иконки в `.iconset` при сборке |
-
-Запись идёт во временный файл и удаляется сразу после расшифровки.
-
-## Подпись и разрешения
-
-macOS привязывает «Универсальный доступ» к подписи приложения. При подписи
-**ad-hoc** отпечаток меняется с каждой сборкой, поэтому разрешение молча
-перестаёт действовать: галочка в списке стоит, а доступа нет.
-
-Поэтому сборка использует постоянный самоподписанный сертификат
-**«Nadiktovka Dev»** из связки ключей — имя осталось от прежнего названия
-приложения и менять его нельзя: к нему привязаны выданные разрешения. С ним требование подписи выглядит так:
-
-```
-identifier "com.grisha.nadiktovka" and certificate leaf = H"9e7252…"
-```
-
-Хеша сборки здесь нет — значит разрешение переживает пересборки.
-
-Если сертификат пропал (например, на другой машине), создать заново:
+Command Line Tools are enough — no Xcode, no package manager.
 
 ```bash
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes \
-  -subj "/CN=Nadiktovka Dev" \
-  -addext "extendedKeyUsage=critical,codeSigning" \
-  -addext "basicConstraints=critical,CA:false" \
-  -addext "keyUsage=critical,digitalSignature"
-openssl pkcs12 -export -out cert.p12 -inkey key.pem -in cert.pem -passout pass:nadiktovka \
-  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
-security import cert.p12 -k ~/Library/Keychains/login.keychain-db -P nadiktovka -T /usr/bin/codesign -A
-rm key.pem cert.p12
+./build.sh          # build into dist/
+./build.sh install  # build, install into /Applications, launch
+./build.sh dmg      # build a disk image
 ```
 
-`build.sh` подхватит его сам. Сертификат числится недоверенным
-(`CSSMERR_TP_NOT_TRUSTED`) — для локальной подписи это нормально и работе не мешает.
-Без сертификата скрипт откатывается на ad-hoc и сам сбрасывает мёртвую запись
-разрешения, чтобы её можно было выдать заново.
+Internals, signing and troubleshooting are documented in [docs/development.md](docs/development.md) — in Russian.
 
-## Если что-то не работает
+## Status
 
-Меню в строке статуса → **«Диагностика…»**. Там видно состояние перехвата
-клавиатуры, микрофона, ключа и текущий хоткей. Подробности пишутся в журнал:
-
-```bash
-tail -f ~/Library/Logs/SayPer.log
-```
-
-## Что стоит знать
-- Аудио уходит на серверы OpenAI. Если это неприемлемо — на то же место
-  вместо `Transcriber` можно поставить локальный `whisper.cpp`.
-- Стоимость `whisper-1` — порядка $0.006 за минуту записи.
-- На время записи звук компьютера приглушается, чтобы музыка не лезла
-  в микрофон. Режим и глубина настраиваются в разделе «Диктовка».
+Beta. It works and gets used daily; rough edges are expected. Issues and ideas are welcome.
