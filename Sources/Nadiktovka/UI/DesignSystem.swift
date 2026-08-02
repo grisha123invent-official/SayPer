@@ -29,6 +29,8 @@ enum Palette {
     static let spaceDivider: CGFloat = 12
 
     static let radiusCard: CGFloat = 12
+    /// Скругление единой панели раздела.
+    static let radiusPanel: CGFloat = 16
     static let radiusTile: CGFloat = 10
     static let radiusField: CGFloat = 6
     static let radiusRow: CGFloat = 8
@@ -83,6 +85,9 @@ enum Palette {
 
     /// Карточка-секция поверх подложки панели.
     static var surfaceCard: Color { themed(light: white(0.70), dark: white(0.055)) }
+    /// Единая панель раздела: заливка под стеклом делает его матовым,
+    /// иначе фон-орб бьёт сквозь панель и мешает читать текст.
+    static var surfacePanel: Color { themed(light: white(0.62), dark: black(0.34)) }
     /// Вложенная плитка статистики, поле словаря, обычная кнопка-капсула.
     static var surfaceTile: Color { themed(light: black(0.045), dark: white(0.075)) }
     /// Строка под курсором.
@@ -243,16 +248,26 @@ struct SectionScaffold<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Palette.spaceCardGap) {
+            // Секции идут одной матовой панелью: раздельные карточки с широкими
+            // просветами разрывали раздел на куски, и фон лез между ними.
+            // Границы секций внутри держат заголовки и волоски.
+            VStack(alignment: .leading, spacing: 0) {
                 content
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Palette.radiusPanel, style: .continuous)
+                    .fill(Palette.surfacePanel)
+            )
+            .glassEffect(
+                .regular,
+                in: RoundedRectangle(cornerRadius: Palette.radiusPanel, style: .continuous)
+            )
             .frame(maxWidth: Palette.contentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, Palette.spaceLg)
             .padding(.vertical, Palette.spaceXl)
         }
-        // Подложку панели (L2) держит корень окна: у панели своего материала нет,
-        // иначе получится второй слой размытия на той же глубине (П2).
         .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -296,17 +311,17 @@ struct GlassCard<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // По горизонтали ширина заказчика устраивает, по вертикали было тесно.
-        .padding(.horizontal, Palette.spaceMd)
+        .padding(.horizontal, Palette.spaceLg)
         .padding(.vertical, Palette.spaceCardVertical)
-        // Карточка — стекло поверх свечения панели. Системное стекло само
-        // подмешивает контраст под текстом, поэтому читаемость не страдает,
-        // в отличие от прежней попытки, где под содержимым просвечивал
-        // рабочий стол.
-        .glassEffect(
-            .regular,
-            in: RoundedRectangle(cornerRadius: Palette.radiusCard, style: .continuous)
-        )
+        // Своего стекла у секции больше нет: раздел собран одной матовой
+        // панелью в SectionScaffold, а секции внутри разделяет волосок
+        // во всю ширину. Вложенное стекло поверх стекла давало муть.
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Palette.hairline)
+                .frame(height: 1)
+                .opacity(0.6)
+        }
     }
 }
 
