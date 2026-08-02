@@ -49,8 +49,12 @@ enum Palette {
 
     /// Полоса разделов: высота аксессуара в титлбаре и высота самой капсулы
     /// (`components.md` §6 — 32 внутри 44, по 6 сверху и снизу).
-    static let tabStripHeight: CGFloat = 44
-    static let tabCapsuleHeight: CGFloat = 32
+    /// Полоса разделов заметно выше капсулы: при высоте впритык капсула
+    /// прилипала к кнопкам окна и полоса читалась сплющенной.
+    static let tabStripHeight: CGFloat = 58
+    static let tabCapsuleHeight: CGFloat = 34
+    /// Воздух между кнопками окна и капсулой.
+    static let tabStripTopInset: CGFloat = 10
 
     /// Длительности движения (`tokens.md` §10).
     static let durHover: Double = 0.12

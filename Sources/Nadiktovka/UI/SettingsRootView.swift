@@ -144,6 +144,8 @@ struct SettingsTabStrip: View {
             }
             .padding(2)
             .frame(height: Palette.tabCapsuleHeight)
+            // Отступ сверху: капсула не должна упираться в кнопки окна.
+            .padding(.top, Palette.tabStripTopInset)
             // Дорожка — настоящее стекло macOS 26: оно само преломляет материал
             // титлбара и рисует кромку.
             .glassEffect(.regular, in: Capsule(style: .continuous))
