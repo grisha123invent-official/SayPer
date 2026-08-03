@@ -19,6 +19,8 @@ final class RecordingIndicator {
     enum State: Equatable {
         case recording
         case transcribing
+        /// Нажали хоткей, пока ещё не готова прошлая расшифровка.
+        case busy
         case error(String)
     }
 
@@ -253,6 +255,8 @@ private final class IndicatorModel: ObservableObject {
             return hint ?? "Слушаю"
         case .transcribing:
             return Self.waitingPhrase(elapsed)
+        case .busy:
+            return "Секунду, дошиваю прошлое"
         case .error(let message):
             return message
         }
@@ -280,7 +284,7 @@ private final class IndicatorModel: ObservableObject {
     var tint: Color {
         switch state {
         case .recording: return Color(red: 0.40, green: 0.68, blue: 1.0)
-        case .transcribing: return Palette.accent
+        case .transcribing, .busy: return Palette.accent
         case .error: return Color(red: 1.0, green: 0.60, blue: 0.40)
         }
     }
@@ -295,7 +299,7 @@ private final class IndicatorModel: ObservableObject {
     var runnerSpeed: Double {
         switch state {
         case .recording: return 62 + Double(min(calmLevel, 1)) * 48
-        case .transcribing: return 115
+        case .transcribing, .busy: return 115
         case .error: return 0
         }
     }
@@ -375,7 +379,7 @@ private struct IndicatorHalo: View {
         switch model.state {
         case .recording:
             return 0.20 + Double(min(model.calmLevel, 1)) * 0.16
-        case .transcribing:
+        case .transcribing, .busy:
             return 0.26 + 0.07 * sin(time * 2 * .pi / 2.4)
         case .error:
             return 0.30
@@ -508,7 +512,7 @@ private struct Equalizer: View {
         case .recording:
             let amplitude = CGFloat(max(level, 0.06))
             return min(amplitude * (0.5 + 0.5 * abs(sin(phase + Double(index) * 0.8))), 1)
-        case .transcribing:
+        case .transcribing, .busy:
             return 0.22 + 0.5 * abs(sin(phase * 1.2 + Double(index) * 0.75))
         case .error:
             return 0.28

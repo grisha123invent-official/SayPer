@@ -55,14 +55,14 @@ enum AudioDevices {
 
     /// Выводит ли мак звук через это устройство прямо сейчас.
     ///
-    /// Именно `DeviceIsRunning`, а не `DeviceIsRunningSomewhere`. Второй флаг
-    /// проверялся первым и оказался бесполезен: он единица, если устройство
-    /// у кого-то просто открыто. На живом маке его держала вкладка браузера,
-    /// ничего не проигрывая, — и приложение считало, что человек слушает мак,
-    /// хотя музыка шла с телефона. Замерено: при музыке с телефона
-    /// `RunningSomewhere` = 1, а `IsRunning` = 0.
+    /// Только `DeviceIsRunningSomewhere`. Соседний `DeviceIsRunning` выглядит
+    /// уместнее по названию, но означает «устройство запущено этим процессом» —
+    /// а мы чужой вывод не запускаем никогда, и он всегда ноль. С ним
+    /// приложение считало, что мак молчит, даже когда музыка играла из него же:
+    /// не глушило звук и не отдавало микрофон наушникам. Замерено на живом
+    /// маке с музыкой через AirPods: `IsRunning` = 0, `RunningSomewhere` = 1.
     static func isRunning(_ id: AudioDeviceID) -> Bool {
-        value(id, address(kAudioDevicePropertyDeviceIsRunning), UInt32(0)) == 1
+        value(id, address(kAudioDevicePropertyDeviceIsRunningSomewhere), UInt32(0)) == 1
     }
 
     static func builtInInput() -> InputDevice? {
