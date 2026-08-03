@@ -232,6 +232,9 @@ struct UsageBlock: View {
             CapsuleButton("Сбросить статистику") { isConfirmingReset = true }
             Spacer(minLength: 0)
         }
+        // Кнопка живёт вне карточки, а боковые поля задаёт карточка —
+        // без этого она вставала на 20pt левее всего остального в разделе.
+        .padding(.horizontal, Palette.spaceLg)
         .padding(.top, Palette.spaceXs)
         .confirmationDialog(
             "Сбросить статистику расходов?",
