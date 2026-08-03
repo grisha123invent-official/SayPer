@@ -300,13 +300,12 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: separated ? 0 : Palette.spaceCardRows) {
             HStack(spacing: Palette.spaceXs) {
-                // Заголовок секции — тихая надстрочная метка, а не второй
-                // по весу текст на экране: границу секции держит он сам
-                // плюс воздух, поэтому волосок под ним больше не нужен.
-                Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(.tertiary)
+                // 13/semibold обычным цветом — как записано в `tokens.md` §6.
+                // Прежние 10pt tertiary uppercase были ТИШЕ основного текста:
+                // группа не может читаться как группа, если её название бледнее
+                // её содержимого. Отсюда и шло ощущение, что раздел слипается.
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: Palette.spaceXs)
                 accessory
             }
@@ -980,5 +979,53 @@ struct SectionPlaceholder: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Ряд, который переносит не поместившееся на следующую строку.
+///
+/// `HStack` в такой роли не годится: он сжимает содержимое до нечитаемого,
+/// а `LazyVGrid` требует заранее известной ширины колонок — у кнопок с текстом
+/// она у каждой своя.
+struct FlowRow: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var line: CGFloat = 0
+        var height: CGFloat = 0
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if line > 0, line + spacing + size.width > width {
+                height += lineHeight + spacing
+                line = 0
+                lineHeight = 0
+            }
+            line += (line > 0 ? spacing : 0) + size.width
+            lineHeight = max(lineHeight, size.height)
+        }
+
+        return CGSize(width: proposal.width ?? line, height: height + lineHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += lineHeight + spacing
+                lineHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
     }
 }

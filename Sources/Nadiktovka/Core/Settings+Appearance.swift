@@ -28,3 +28,12 @@ extension Settings {
         set { set(newValue.rawValue, forKey: AppearanceKey.lastSection) }
     }
 }
+
+extension Settings {
+    /// Подробный журнал: ключ `log.verbose`. Выключен по умолчанию —
+    /// в обычной работе он только мешает читать.
+    var verboseLog: Bool {
+        get { flag("log.verbose") }
+        set { set(newValue, forKey: "log.verbose") }
+    }
+}

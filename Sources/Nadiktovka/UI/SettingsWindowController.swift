@@ -32,6 +32,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let window = self.window ?? makeWindow()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        // Снимаем фокус с первого попавшегося поля. Иначе, открыв раздел
+        // с текстовым полем, человек видит его уже подсвеченным и обведённым,
+        // хотя ничего туда не собирался писать, — и не понимает, как выйти.
+        window.makeFirstResponder(nil)
     }
 
     // MARK: - Окно

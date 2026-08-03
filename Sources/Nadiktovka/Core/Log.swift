@@ -36,6 +36,16 @@ enum Log {
         return formatter
     }()
 
+    /// Подробности для разбора: их пишем только когда включён подробный журнал.
+    ///
+    /// Разделение нужно, потому что обычный журнал читает человек — там должны
+    /// быть события, а не поток. Подробный включают на время, чтобы поймать
+    /// плавающую беду и отдать файл разработчику.
+    static func debug(_ message: String) {
+        guard Settings.shared.verboseLog else { return }
+        write("· " + message)
+    }
+
     static func write(_ message: String) {
         let line = "[\(formatter.string(from: Date()))] \(message)\n"
 

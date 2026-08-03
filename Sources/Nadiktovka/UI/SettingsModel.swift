@@ -48,6 +48,13 @@ final class SettingsModel: ObservableObject {
 
     @Published var accessibilityGranted: Bool = HotkeyMonitor.isTrusted
 
+    /// Меняется, когда акцент или тему поменяли не из «Кастомизации» —
+    /// например кнопкой помощника. Сама карточка тогда не участвует,
+    /// а перерисовать окно надо: акцент читается на месте отрисовки.
+    @Published private(set) var appearanceStamp = 0
+
+    func appearanceChanged() { appearanceStamp += 1 }
+
     struct KeyCheck {
         let isOK: Bool
         let message: String
