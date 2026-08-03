@@ -56,9 +56,9 @@ enum Sounds {
         // Новый экземпляр на каждый сигнал: у общего `play()` обрывает
         // предыдущее воспроизведение, а сигналы идут встык — «запись
         // закончена» звучит почти сразу за «текст вставлен».
+        guard canBeHeard else { return }
         guard let sound = NSSound(named: event.systemName) else { return }
         sound.volume = volume
-        route(sound)
         sound.play()
     }
 
@@ -66,20 +66,25 @@ enum Sounds {
     /// человек крутит громкость и хочет её слышать.
     static func preview(_ event: SoundEvent = .done) {
         let volume = Float(Settings.shared.soundVolume)
+        // Образец из настроек звучит всегда: человек сам его попросил,
+        // и он в этот момент смотрит в окно, а не диктует.
         guard volume > 0.001, let sound = NSSound(named: event.systemName) else { return }
         sound.volume = volume
-        route(sound)
         sound.play()
     }
 
-    /// Уводит сигнал с беспроводных наушников, если мак через них молчит.
+    /// Можно ли вообще подавать голос прямо сейчас.
     ///
-    /// Иначе короткий «тинь» на старте записи будит наушники, подключённые
-    /// и к маку, и к телефону: они уходят с телефона на мак, и музыка
-    /// обрывается. Человек нажал диктовать, а не переключать наушники.
-    private static func route(_ sound: NSSound) {
-        guard let device = AudioDevices.soundOutput() else { return }
-        sound.playbackDeviceIdentifier = device.uid
+    /// Нельзя, пока вывод стоит на беспроводной гарнитуре, которую человек
+    /// не выбрал микрофоном: короткого «тинь» достаточно, чтобы наушники,
+    /// подключённые и к маку, и к телефону, перескочили на мак и оборвали
+    /// музыку. Выбрал их микрофоном — значит сказал, что они на маке,
+    /// и сигналы снова звучат.
+    ///
+    /// Пока сигналы молчат, о ходе записи говорят пилюля и значок
+    /// в строке меню.
+    private static var canBeHeard: Bool {
+        AudioDevices.mayTouchOutput()
     }
 }
 

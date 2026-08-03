@@ -19,14 +19,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboarding: OnboardingWindowController?
 
     private var lastText: String?
-    private var isBusy = false
+    /// Расшифровки идут параллельно: записав фразу, человек сразу диктует
+    /// следующую, а ответы вставляются в порядке записей.
+    private let queue = TranscriptionQueue()
     /// Громкость для значка в строке меню. Отдельно от индикатора: там кадры
     /// идут по тридцать раз в секунду, а значок перерисовывается вчетверо реже —
     /// в строке меню такой частоты глазу хватает, а работы вчетверо меньше.
     private var statusLevel: Float = 0
     private var lastStatusLevelDraw = Date.distantPast
-    private var transcription: Task<Void, Never>?
     private var elapsedTimer: Timer?
+    /// Устройство под текущую запись, если его назначило сочетание клавиш.
+    private var deviceForNextRecording: String?
 
     /// Короче этого удержание считаем случайным.
     private let minimumDuration: TimeInterval = 0.35
@@ -83,7 +86,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        hotkeys.onPress = { [weak self] in self?.gate.hotkeyPressed() }
+        queue.onReady = { [weak self] text, job in self?.deliver(text, from: job) }
+        queue.onFailure = { [weak self] message in self?.fail(message) }
+        queue.onActivityChange = { [weak self] busy in
+            guard let self else { return }
+            if busy {
+                self.status = .transcribing
+                self.indicator.show(.transcribing)
+                self.startElapsedTimer()
+            } else {
+                self.stopElapsedTimer()
+                // Пилюлю прячем только если сейчас не идёт новая запись:
+                // человек мог начать диктовать, пока хвост очереди дошивался.
+                if !self.recorder.isRecording {
+                    self.indicator.hide()
+                    self.status = .idle
+                }
+            }
+        }
+
+        hotkeys.onPress = { [weak self] deviceTag in
+            guard let self else { return }
+            // Тег приходит только в режиме «клавиша на устройство»: какое
+            // сочетание зажали, с того микрофона и пишем эту фразу.
+            self.deviceForNextRecording = deviceTag
+            self.gate.hotkeyPressed()
+        }
         hotkeys.onRelease = { [weak self] in self?.gate.hotkeyReleased() }
         hotkeys.onCancel = { [weak self] in self?.gate.hotkeyCancelled() }
         hotkeys.onEscape = { [weak self] in
@@ -340,7 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Универсальный доступ: \(HotkeyMonitor.isTrusted ? "выдан" : "НЕ ВЫДАН")
         Мониторинг ввода: \(HotkeyMonitor.inputMonitoringStatus)
         Микрофон: \(micStatus)
-        Устройство записи: \(AudioDevices.explain(Settings.shared.microphoneMode))
+        Устройство записи: \(AudioDevices.explain())
         API-ключ: \(Settings.shared.apiKey == nil ? "не задан" : "задан") · \(Keychain.backendDescription)
         Хоткей: \(Settings.shared.hotkey.displayString)
         Вставка: \(Settings.shared.insertMode.title)
@@ -381,16 +409,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // выходим отсюда, не начав её, он обязан узнать об этом — иначе
         // в режиме «нажал-нажал» следующее нажатие будет принято за
         // завершение несуществующей записи, и фраза потеряется.
-        guard !isBusy, !recorder.isRecording else {
+        // Ждать конца прошлой расшифровки больше не нужно: она доедет сама,
+        // в фоне. Занят бывает только микрофон — он один, и вторую запись
+        // поверх первой начать нельзя.
+        guard !recorder.isRecording else {
             gate.recordingDidStop()
-            // Нажатие, пока не готова прошлая расшифровка, раньше пропадало
-            // молча: ни пилюли, ни звука, ни записи. А текст прошлой фразы
-            // как раз долетал — и выглядело это как «диктует, но без пилюли».
-            // Теперь про потерянное нажатие сказано прямо.
-            if isBusy {
-                indicator.show(.busy)
-                Log.write("Нажатие пропущено: ещё идёт прошлая расшифровка")
-            }
             return
         }
 
@@ -402,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         do {
-            try recorder.start()
+            try recorder.start(deviceTag: deviceForNextRecording)
             // Музыка и видео лезут в микрофон, поэтому глушим их на время
             // записи. Возврат — в каждой точке выхода из неё.
             OutputDucker.duck()
@@ -448,61 +471,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   + "→ отправляю в \(Settings.shared.model.rawValue)")
 
         Sounds.play(.stop)
-        status = .transcribing
-        indicator.show(.transcribing)
-        isBusy = true
-        startElapsedTimer()
 
-        let startedAt = Date()
-        transcription = Task { @MainActor in
-            defer {
-                isBusy = false
-                stopElapsedTimer()
-                transcription = nil
-                try? FileManager.default.removeItem(at: result.url)
-            }
+        // Запись, остановленная авто-стопом, доставляется в буфер, а не
+        // печатается: человек про неё забыл, и вслепую вставлять минуты речи
+        // в случайное поле нельзя. Подмена одноразовая, поэтому способ вставки
+        // запоминается здесь, а не в момент ответа: к тому времени очередь
+        // может уже принять следующую фразу с обычным способом.
+        let insertMode = gate.consumeInsertModeOverride() ?? Settings.shared.insertMode
+        queue.enqueue(audio: result.url, duration: result.duration, insertMode: insertMode)
+    }
 
-            do {
-                let text = try await Transcriber.transcribe(fileURL: result.url)
-                guard !Task.isCancelled else { return }
+    /// Готовый текст пришёл и дождался своей очереди.
+    private func deliver(_ text: String, from job: TranscriptionQueue.Job) {
+        Log.write("Расшифровано \(text.count) символов, вставляю "
+                  + "способом «\(job.insertMode.title)»")
+        lastText = text
+        TextInserter.deliver(text, mode: job.insertMode)
+        Sounds.play(.done)
 
-                // Запись, остановленная авто-стопом, доставляется в буфер, а не
-                // печатается: человек про неё забыл, и вслепую вставлять минуты
-                // речи в случайное поле нельзя. Подмена одноразовая.
-                let insertMode = gate.consumeInsertModeOverride() ?? Settings.shared.insertMode
-
-                Log.write("Расшифровано \(text.count) символов, вставляю "
-                          + "способом «\(insertMode.title)»")
-                lastText = text
-                indicator.hide()
-                status = .idle
-                TextInserter.deliver(text, mode: insertMode)
-                Sounds.play(.done)
-
-                TranscriptionBus.publish(TranscriptionRecord(
-                    text: text,
-                    audioDuration: result.duration,
-                    latency: Date().timeIntervalSince(startedAt),
-                    modelID: Settings.shared.model.rawValue,
-                    language: Settings.shared.language,
-                    cleanupUsed: Settings.shared.cleanup
-                ))
-            } catch {
-                // Отмена приходит и как CancellationError, и как URLError(.cancelled) —
-                // это не сбой, ругаться на неё не надо.
-                let cancelled = error is CancellationError
-                    || (error as? URLError)?.code == .cancelled
-                    || Task.isCancelled
-
-                if cancelled {
-                    Log.write("Расшифровка отменена")
-                    indicator.hide()
-                    status = .idle
-                } else {
-                    fail(error.localizedDescription)
-                }
-            }
-        }
+        TranscriptionBus.publish(TranscriptionRecord(
+            text: text,
+            audioDuration: job.duration,
+            latency: Date().timeIntervalSince(job.startedAt),
+            modelID: Settings.shared.model.rawValue,
+            language: Settings.shared.language,
+            cleanupUsed: Settings.shared.cleanup
+        ))
     }
 
     /// Esc: прерывает и запись, и ожидание ответа от OpenAI.
@@ -513,11 +507,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard let transcription else { return }
-        transcription.cancel()
-        self.transcription = nil
+        guard !queue.isEmpty else { return }
+        queue.cancelAll()
         stopElapsedTimer()
-        isBusy = false
         indicator.hide()
         status = .idle
         Log.write("Ожидание расшифровки прервано по Esc")
@@ -525,9 +517,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startElapsedTimer() {
         stopElapsedTimer()
-        let startedAt = Date()
         elapsedTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.indicator.update(elapsed: Date().timeIntervalSince(startedAt))
+            guard let self else { return }
+            // Считаем по самой старой фразе в очереди: именно её ждут дольше
+            // всех, и именно она задерживает вставку остальных.
+            self.indicator.update(elapsed: self.queue.oldestWait)
         }
     }
 

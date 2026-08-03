@@ -5,7 +5,10 @@ import IOKit.hid
 /// Tap, а не NSEvent-монитор, потому что нажатие обычной клавиши в составе
 /// хоткея нужно «съедать», иначе символ улетит в активное поле.
 final class HotkeyMonitor {
-    var onPress: (() -> Void)?
+    /// Сработало сочетание. Аргумент — тег устройства из привязки: в режиме
+    /// «клавиша на устройство» именно он решает, с какого микрофона писать.
+    /// `nil` — устройство определяется обычным порядком.
+    var onPress: ((String?) -> Void)?
     var onRelease: (() -> Void)?
     var onCancel: (() -> Void)?
     /// Esc — универсальная отмена: прерывает и запись, и ожидание расшифровки.
@@ -19,7 +22,13 @@ final class HotkeyMonitor {
     /// Удалось ли поставить перехват клавиатуры.
     private(set) var isActive = false
 
-    private var binding: HotkeyBinding = .rightOptionOnly
+    /// Все сочетания, за которыми следим. В обычном режиме оно одно.
+    private var routes: [HotkeyRoute] = []
+    /// Какое сочетание держат прямо сейчас.
+    private var heldRoute: HotkeyRoute?
+    /// Отложенный старт для сочетания, которое является частью другого:
+    /// ⌃ нельзя отличить от начала ⌃⇧ иначе как подождав.
+    private var pendingStart: DispatchWorkItem?
     private var currentMask: UInt = 0
     private var pressedKey: UInt16?
     private var isHeld = false
@@ -51,9 +60,19 @@ final class HotkeyMonitor {
     private var watchdog: Timer?
 
     func start() {
-        binding = Settings.shared.hotkey
+        routes = Self.currentRoutes()
         installTap()
         startWatchdog()
+    }
+
+    /// Сочетания из настроек: либо одно основное, либо таблица привязок.
+    private static func currentRoutes() -> [HotkeyRoute] {
+        switch Settings.shared.micRouting {
+        case .panel:
+            return [HotkeyRoute(binding: Settings.shared.hotkey, deviceTag: "")]
+        case .perHotkey:
+            return Settings.shared.hotkeyRoutes.filter { $0.binding.isValid }
+        }
     }
 
     /// Разрешение можно выдать при уже запущенном приложении — тогда перехват
@@ -94,14 +113,19 @@ final class HotkeyMonitor {
             isHeld = false
             deliver(onRelease)
         }
-        binding = Settings.shared.hotkey
+        routes = Self.currentRoutes()
         resetState()
+        Log.write("Сочетания перечитаны: " + routes.map { $0.binding.displayString }
+            .joined(separator: ", "))
     }
 
     private func resetState() {
+        pendingStart?.cancel()
+        pendingStart = nil
         currentMask = 0
         pressedKey = nil
         isHeld = false
+        heldRoute = nil
         interrupted = false
     }
 
@@ -138,8 +162,10 @@ final class HotkeyMonitor {
         self.tap = tap
         self.runLoopSource = source
         isActive = true
-        Log.write("Перехват клавиатуры установлен. Хоткей: \(binding.displayString) "
-                  + "(mask=0x\(String(binding.mask, radix: 16)), key=\(binding.keyCode.map(String.init) ?? "нет"))")
+        Log.write("Перехват клавиатуры установлен. Сочетания: "
+                  + routes.map { "\($0.binding.displayString)"
+                      + ($0.deviceTag.isEmpty ? "" : " → \($0.deviceTag)") }
+                      .joined(separator: ", "))
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -164,9 +190,10 @@ final class HotkeyMonitor {
                 }
                 pressedKey = keyCode
                 // Хоткей без обычной клавиши + нажатие буквы = обычный шорткат.
-                if isHeld, binding.keyCode == nil {
+                if isHeld, heldRoute?.keyCode == nil {
                     interrupted = true
                     isHeld = false
+                    heldRoute = nil
                     deliver(onCancel)
                 }
             }
@@ -179,9 +206,10 @@ final class HotkeyMonitor {
         updateHeldState()
 
         // Клавишу, входящую в хоткей, дальше не пропускаем.
-        if let bound = binding.keyCode, bound == keyCode,
-           type == .keyDown || type == .keyUp,
-           (currentMask & binding.mask) == binding.mask {
+        if type == .keyDown || type == .keyUp,
+           routes.contains(where: { route in
+               route.keyCode == keyCode && (currentMask & route.mask) == route.mask
+           }) {
             return nil
         }
 
@@ -189,16 +217,20 @@ final class HotkeyMonitor {
     }
 
     private func updateHeldState() {
-        let held = binding.isHeld(currentMask: currentMask, pressedKey: pressedKey)
+        let match = bestMatch()
 
-        if held, !isHeld, !interrupted {
-            isHeld = true
-            Log.write("Хоткей зажат")
-            deliver(onPress)
-        } else if !held, isHeld {
+        if let match, !isHeld, !interrupted {
+            start(match)
+        } else if match == nil, isHeld {
+            pendingStart?.cancel()
+            pendingStart = nil
             isHeld = false
+            heldRoute = nil
             Log.write("Хоткей отпущен")
             deliver(onRelease)
+        } else if let match, isHeld, let held = heldRoute, match != held, pendingStart != nil {
+            // Пока ждали, зажали более точное сочетание — берём его.
+            start(match)
         }
 
         // Все модификаторы отпущены — снимаем блокировку на следующий заход.
@@ -207,8 +239,65 @@ final class HotkeyMonitor {
         }
     }
 
-    /// Колбэки уводим с потока tap: запуск записи слишком тяжёлый,
-    /// система отключила бы tap по таймауту.
+    /// Самое точное из подходящих сочетаний.
+    ///
+    /// ⌃⇧ удовлетворяет и привязке на ⌃, и привязке на ⌃⇧ — брать надо вторую,
+    /// иначе более длинное сочетание не сработает никогда. Точнее то, у кого
+    /// есть обычная клавиша, а при равенстве — у кого больше модификаторов.
+    private func bestMatch() -> HotkeyRoute? {
+        routes
+            .filter { $0.binding.isHeld(currentMask: currentMask, pressedKey: pressedKey) }
+            .max { a, b in
+                let aScore = (a.keyCode != nil ? 100 : 0) + a.mask.nonzeroBitCount
+                let bScore = (b.keyCode != nil ? 100 : 0) + b.mask.nonzeroBitCount
+                return aScore < bScore
+            }
+    }
+
+    /// Начинает запись по сочетанию — сразу или с задержкой.
+    ///
+    /// Задержка нужна только там, где сочетание является частью другого:
+    /// ⌃ и ⌃⇧ физически нельзя нажать одновременно, ⌃ приходит первым,
+    /// и без паузы длинное сочетание никогда бы не дождалось своей очереди.
+    /// Во всех остальных случаях старт мгновенный.
+    private func start(_ route: HotkeyRoute) {
+        pendingStart?.cancel()
+        pendingStart = nil
+
+        guard isPrefixOfAnother(route) else {
+            fire(route)
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.pendingStart != nil else { return }
+            self.pendingStart = nil
+            self.fire(route)
+        }
+        pendingStart = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: work)
+    }
+
+    private func fire(_ route: HotkeyRoute) {
+        isHeld = true
+        heldRoute = route
+        Log.write("Хоткей зажат: \(route.binding.displayString)"
+                  + (route.deviceTag.isEmpty ? "" : " → \(route.deviceTag)"))
+        let tag: String? = Settings.shared.micRouting == .perHotkey ? route.deviceTag : nil
+        if let onPress {
+            DispatchQueue.main.async { onPress(tag) }
+        }
+    }
+
+    /// Есть ли сочетание, которое включает это как часть себя.
+    private func isPrefixOfAnother(_ route: HotkeyRoute) -> Bool {
+        routes.contains { other in
+            guard other != route else { return false }
+            guard (other.mask & route.mask) == route.mask else { return false }
+            return other.mask != route.mask || (route.keyCode == nil && other.keyCode != nil)
+        }
+    }
+
     private func deliver(_ action: (() -> Void)?) {
         guard let action else { return }
         DispatchQueue.main.async(execute: action)

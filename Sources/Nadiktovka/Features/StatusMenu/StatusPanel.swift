@@ -211,6 +211,16 @@ final class StatusPanelModel: ObservableObject {
     @Published var hotkey = ""
     @Published var cleanup = false
     @Published var history: [TranscriptionRecord] = []
+    /// Подключённые сейчас микрофоны и выбранный из них. Перечитываются
+    /// при каждом открытии панели: наушники подключают и отключают, а панель
+    /// живёт между показами.
+    @Published var microphones: [InputDevice] = []
+    @Published var microphoneTag = ""
+    @Published var microphoneMissing = false
+    /// В режиме «клавиша на устройство» строка выбора в панели прячется:
+    /// микрофон там назначает само сочетание, и второй орган управления
+    /// тем же самым только сбивал бы с толку.
+    @Published var showsMicrophoneRow = true
     @Published var todayMinutes = 0.0
     @Published var todayCost = 0.0
     @Published var todayCount = 0
@@ -225,6 +235,10 @@ final class StatusPanelModel: ObservableObject {
         hotkey = Settings.shared.hotkey.displayString
         cleanup = Settings.shared.cleanup
         history = Array(HistoryStore.shared.items.prefix(3))
+        microphones = AudioDevices.inputs()
+        microphoneTag = Settings.shared.microphone.tag
+        microphoneMissing = AudioDevices.selectedIsMissing()
+        showsMicrophoneRow = Settings.shared.micRouting == .panel
 
         let today = UsageStore.shared.today
         todayMinutes = today.minutes
@@ -450,6 +464,10 @@ private struct StatusPanelView: View {
 
     private var controls: some View {
         VStack(spacing: 8) {
+            if model.showsMicrophoneRow {
+                microphoneRow
+            }
+
             HStack(spacing: 8) {
                 Text("Режим")
                     .font(.system(size: 12))
@@ -481,6 +499,55 @@ private struct StatusPanelView: View {
         // Своей плашки у переключателей нет: выделять фоном есть смысл
         // только список данных, а два контрола и так читаются как группа.
         .padding(.horizontal, 4)
+    }
+
+    /// Выбор микрофона. Стоит первым: это решают до диктовки, а режим
+    /// и причёсывание — уже во вторую очередь.
+    ///
+    /// Приложение не угадывает, слушает ли человек через беспроводные
+    /// наушники мак или телефон, — определить это macOS не позволяет
+    /// (см. `AudioDevices.isShared`). Поэтому спрашивает один раз и помнит.
+    private var microphoneRow: some View {
+        HStack(spacing: 8) {
+            Text("Микрофон")
+                .font(.system(size: 12))
+
+            // Пропажу выбранного устройства показываем значком, а не цветом:
+            // цвет не должен быть единственным носителем смысла.
+            if model.microphoneMissing {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.warning)
+                    .help("Выбранное устройство отключено — пишу со встроенного")
+            }
+
+            Spacer(minLength: 0)
+
+            // Нативный Picker, а не свой список: галочка на выбранном,
+            // работа с клавиатуры и VoiceOver достаются даром.
+            Picker("", selection: Binding(
+                get: { model.microphoneTag },
+                set: { tag in
+                    Settings.shared.microphone = MicrophoneChoice(tag: tag)
+                    model.microphoneTag = tag
+                    model.microphoneMissing = AudioDevices.selectedIsMissing()
+                }
+            )) {
+                // «Авто» — системный микрофон по умолчанию, но беспроводную
+                // гарнитуру он не берёт: взяв её вслепую, приложение отобрало
+                // бы наушники у телефона.
+                Text("Автоматически").tag("")
+                Text("Встроенный").tag("builtin")
+                Divider()
+                ForEach(model.microphones.filter { !$0.isBuiltIn }) { device in
+                    Text(device.name).tag(device.uid)
+                }
+            }
+            .labelsHidden()
+            // Та же ширина, что у сегментов ниже: колонка контролов
+            // держит общую линию.
+            .frame(width: 196)
+        }
     }
 
     // MARK: Низ

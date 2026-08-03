@@ -39,7 +39,7 @@ final class AudioRecorder {
         }
     }
 
-    func start() throws {
+    func start(deviceTag: String? = nil) throws {
         guard !isRecording else { return }
 
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
@@ -49,7 +49,7 @@ final class AudioRecorder {
         // Устройство назначаем до первого обращения к формату: движок
         // запрашивает параметры у того устройства, которое стоит в этот момент,
         // и переключать его потом уже поздно.
-        selectInputDevice()
+        selectInputDevice(deviceTag)
 
         let input = engine.inputNode
         let inputFormat = input.inputFormat(forBus: 0)
@@ -95,10 +95,13 @@ final class AudioRecorder {
     /// и рядом беспроводные наушники — и запись отбирает их у телефона.
     /// Единственный способ задать устройство на macOS — достучаться до AUHAL
     /// под движком: у самого AVAudioEngine такого свойства нет.
-    private func selectInputDevice() {
-        let mode = Settings.shared.microphoneMode
-        guard let device = AudioDevices.resolve(mode) else {
-            Log.write("Микрофон: \(AudioDevices.explain(mode))")
+    private func selectInputDevice(_ deviceTag: String?) {
+        // Тег приходит из режима «клавиша на устройство»: там микрофон
+        // назначает само сочетание, а не общий выбор в панели.
+        let chosen = deviceTag.map { AudioDevices.resolve(MicrophoneChoice(tag: $0)) }
+            ?? AudioDevices.selected()
+        guard let device = chosen else {
+            Log.write("Микрофон: \(AudioDevices.explain())")
             return
         }
 
@@ -120,7 +123,7 @@ final class AudioRecorder {
         )
 
         if status == noErr {
-            Log.write("Микрофон: \(AudioDevices.explain(mode))")
+            Log.write("Микрофон: \(AudioDevices.explain())")
         } else {
             Log.write("Микрофон: не удалось выбрать «\(device.name)» (код \(status)), "
                       + "остаётся системный")

@@ -13,9 +13,6 @@ struct SettingsSectionGeneral: View {
 
     @State private var duckMode = Settings.shared.duckMode
     @State private var duckLevel = Settings.shared.duckLevel
-    @State private var micChoice = MicrophoneChoice(Settings.shared.microphoneMode)
-    @State private var micDevices = AudioDevices.inputs()
-    @State private var micExplained = AudioDevices.explain(Settings.shared.microphoneMode)
 
     private let languages: [(String, String)] = [
         ("", "Автоопределение"),
@@ -26,10 +23,13 @@ struct SettingsSectionGeneral: View {
         ("fr", "Français")
     ]
 
+    @State private var routing = Settings.shared.micRouting
+    @State private var routes = Settings.shared.hotkeyRoutes
+    @State private var devices = AudioDevices.inputs()
+
     var body: some View {
         SectionScaffold {
             activation
-            microphone
             duringRecording
             transcription
             insertion
@@ -41,58 +41,110 @@ struct SettingsSectionGeneral: View {
     /// Сочетание и режим — одна тема: чем запускается запись.
     private var activation: some View {
         GlassCard("Активация") {
-            SettingRow(
-                "Сочетание",
-                subtitle: "Кликни по полю и зажми клавиши. Левые и правые различаются"
-            ) {
+            // В режиме «на клавише» это поле лишнее: сочетания там задаёт
+            // таблица ниже, и два органа управления одним и тем же путают.
+            if routing == .panel {
+                SettingRow(
+                    "Сочетание",
+                    subtitle: "Кликни по полю и зажми клавиши. Левые и правые различаются"
+                ) {
                 // Сброс живёт внутри поля, у правого края с отступом 6
                 // (`components.md` §2), и рисует его сам рекордер. Отдельной
                 // кнопкой рядом он сдвигал поле на 28pt в момент появления —
                 // то есть ровно тогда, когда человек целится в клавиши.
-                HotkeyRecorder(hotkey: $model.hotkey)
-                    .frame(width: 190, height: 28)
+                    HotkeyRecorder(hotkey: $model.hotkey)
+                        .frame(width: 190, height: 28)
+                }
             }
 
             RecordingModeRow()
+
+            CardDivider()
+
+            SettingRow("Выбор микрофона", subtitle: routing.summary) {
+                SegmentedControl(selection: $routing, options: MicRouting.allCases,
+                                 compact: true) { $0.title }
+                    .frame(width: 240)
+            }
+            .onChange(of: routing) { _, newValue in
+                Settings.shared.micRouting = newValue
+                model.onHotkeyChange?()
+            }
+
+            if routing == .perHotkey {
+                hotkeyRoutes
+            }
         }
     }
 
-    // MARK: - Откуда слушать
+    /// Таблица «сочетание → микрофон».
+    ///
+    /// Первая строка играет роль основного сочетания: без неё записывать
+    /// нечем, поэтому удалить последнюю строку нельзя.
+    private var hotkeyRoutes: some View {
+        VStack(alignment: .leading, spacing: Palette.spaceXs) {
+            ForEach($routes) { $route in
+                HStack(spacing: Palette.spaceXs) {
+                    HotkeyRecorder(hotkey: Binding(
+                        get: { route.binding },
+                        set: { route.binding = $0; saveRoutes() }
+                    ))
+                    .frame(width: 170, height: 28)
 
-    private var microphone: some View {
-        GlassCard("Микрофон") {
-            SettingRow("Устройство", subtitle: micExplained) {
-                Picker("", selection: $micChoice) {
-                    Text("Умно").tag(MicrophoneChoice.smart)
-                    Text("Встроенный").tag(MicrophoneChoice.builtIn)
-                    Text("Как в системе").tag(MicrophoneChoice.systemDefault)
-                    Divider()
-                    ForEach(micDevices) { device in
-                        Text(device.name).tag(MicrophoneChoice.specific(device.uid))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+
+                    Picker("", selection: Binding(
+                        get: { route.deviceTag },
+                        set: { route.deviceTag = $0; saveRoutes() }
+                    )) {
+                        Text("Автоматически").tag("")
+                        Text("Встроенный").tag("builtin")
+                        Divider()
+                        ForEach(devices.filter { !$0.isBuiltIn }) { device in
+                            Text(device.name).tag(device.uid)
+                        }
                     }
-                }
-                .labelsHidden()
-                .frame(width: 240)
-                .onChange(of: micChoice) { _, choice in
-                    Settings.shared.microphoneMode = choice.mode
-                    micExplained = AudioDevices.explain(choice.mode)
+                    .labelsHidden()
+                    .frame(width: 190)
+
+                    Button {
+                        routes.removeAll { $0.id == route.id }
+                        saveRoutes()
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .font(.system(size: 13))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(routes.count <= 1)
+                    .help("Убрать строку")
                 }
             }
 
-            // Ради чего вся настройка: беспроводные наушники, подключённые
-            // и к маку, и к телефону, числятся микрофоном по умолчанию, даже
-            // когда играет телефон. Открыв на них вход, приложение отбирает
-            // их у телефона и обрывает музыку.
-            Hint("«Умно» не трогает беспроводные наушники, пока ты слушаешь через них "
-                 + "не мак, а телефон: в этом случае запись идёт со встроенного микрофона. "
-                 + "Как только звук пойдёт с мака, диктовка снова пойдёт через наушники.")
+            CapsuleButton("Добавить сочетание", symbol: "plus") {
+                routes.append(HotkeyRoute(binding: HotkeyBinding(mask: 0, keyCode: nil),
+                                          deviceTag: "builtin"))
+                saveRoutes()
+            }
+
+            // Про задержку человек должен знать заранее: иначе решит,
+            // что приложение подтормаживает.
+            Hint("Если одно сочетание входит в другое — ⌃ и ⌃⇧, — короткое ждёт "
+                 + "четверть секунды, прежде чем начать: нажать оба модификатора "
+                 + "одновременно физически нельзя, и без паузы длинное не сработало бы "
+                 + "никогда. У непересекающихся сочетаний задержки нет.")
         }
-        // Список устройств меняется, пока окно открыто: наушники подключают
-        // и отключают. Обновляем при каждом показе раздела.
-        .onAppear {
-            micDevices = AudioDevices.inputs()
-            micExplained = AudioDevices.explain(Settings.shared.microphoneMode)
-        }
+        .onAppear { devices = AudioDevices.inputs() }
+    }
+
+    private func saveRoutes() {
+        Settings.shared.hotkeyRoutes = routes
+        model.onHotkeyChange?()
     }
 
     // MARK: - Пока говоришь
@@ -218,33 +270,6 @@ struct SettingsSectionGeneral: View {
                 .labelsHidden()
                 .frame(width: 300)
             }
-        }
-    }
-}
-
-/// Обёртка над `MicrophoneMode` для `Picker`: ему нужен Hashable-тег,
-/// а разбирать ассоциированное значение в каждой ветке меню неудобно.
-enum MicrophoneChoice: Hashable {
-    case smart
-    case builtIn
-    case systemDefault
-    case specific(String)
-
-    init(_ mode: MicrophoneMode) {
-        switch mode {
-        case .smart: self = .smart
-        case .builtIn: self = .builtIn
-        case .systemDefault: self = .systemDefault
-        case .specific(let uid): self = .specific(uid)
-        }
-    }
-
-    var mode: MicrophoneMode {
-        switch self {
-        case .smart: return .smart
-        case .builtIn: return .builtIn
-        case .systemDefault: return .systemDefault
-        case .specific(let uid): return .specific(uid)
         }
     }
 }

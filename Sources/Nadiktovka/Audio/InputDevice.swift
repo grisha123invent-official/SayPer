@@ -21,6 +21,13 @@ struct InputDevice: Identifiable, Equatable {
 
     var isBuiltIn: Bool { transport == kAudioDeviceTransportTypeBuiltIn }
 
+    /// Настоящее железо, а не программная прослойка.
+    var isRealHardware: Bool {
+        transport != kAudioDeviceTransportTypeVirtual
+            && transport != kAudioDeviceTransportTypeAggregate
+            && transport != kAudioDeviceTransportTypeUnknown
+    }
+
     /// Одни и те же наушники macOS показывает двумя устройствами: UID у них
     /// `54-2A-43-4D-CB-55:input` и `…:output`. Чтобы понять, что микрофон
     /// и колонки — это одна гарнитура, сравнивать надо часть до двоеточия.
@@ -40,9 +47,16 @@ struct InputDevice: Identifiable, Equatable {
 enum AudioDevices {
     // MARK: - Перечисление
 
+    /// Микрофоны, с которых действительно можно писать.
+    ///
+    /// Виртуальные устройства и агрегаты отсеиваются: Zoom и Teams заводят
+    /// свои «микрофоны», чтобы прокачивать через себя чужой звук, а
+    /// `CADefaultDeviceAggregate` — служебная сборка самой системы. Записать
+    /// с них голос нельзя, а в списке они путают.
     static func inputs() -> [InputDevice] {
         all().filter { channels($0, scope: kAudioObjectPropertyScopeInput) > 0 }
             .map(describe)
+            .filter { $0.isRealHardware }
     }
 
     static func defaultInput() -> AudioDeviceID? {
@@ -53,16 +67,31 @@ enum AudioDevices {
         systemDevice(kAudioHardwarePropertyDefaultOutputDevice)
     }
 
-    /// Выводит ли мак звук через это устройство прямо сейчас.
+    /// Беспроводная гарнитура, которую нельзя трогать без спроса: она может
+    /// быть подключена и к маку, и к телефону одновременно, и любое обращение
+    /// к ней — микрофон, громкость, звук — перетягивает её на мак.
     ///
-    /// Только `DeviceIsRunningSomewhere`. Соседний `DeviceIsRunning` выглядит
-    /// уместнее по названию, но означает «устройство запущено этим процессом» —
-    /// а мы чужой вывод не запускаем никогда, и он всегда ноль. С ним
-    /// приложение считало, что мак молчит, даже когда музыка играла из него же:
-    /// не глушило звук и не отдавало микрофон наушникам. Замерено на живом
-    /// маке с музыкой через AirPods: `IsRunning` = 0, `RunningSomewhere` = 1.
-    static func isRunning(_ id: AudioDeviceID) -> Bool {
-        value(id, address(kAudioDevicePropertyDeviceIsRunningSomewhere), UInt32(0)) == 1
+    /// Отличить «мак сейчас звучит в наушники» от «звучит телефон» macOS
+    /// не позволяет, и это проверено, а не предположено. Замерены три
+    /// состояния на живой машине:
+    ///
+    /// | что происходит | процессы с `IsRunningOutput` на устройстве |
+    /// |---|---|
+    /// | мак играет музыку | WebKit, Music |
+    /// | мак на паузе | WebKit |
+    /// | играет телефон | WebKit |
+    ///
+    /// Последние два неотличимы: Safari держит открытый поток вывода
+    /// постоянно. `DeviceIsRunningSomewhere` в этих же состояниях всегда
+    /// единица, `DeviceIsRunning` — всегда ноль (он про свой процесс),
+    /// а `ProcessIsAudible` вообще не запрос про чужие процессы, а рычаг
+    /// «заглушить себя». Публичного признака нет; Apple делает своё
+    /// автопереключение не через открытый API.
+    ///
+    /// Поэтому приложение не угадывает, а не трогает такие устройства
+    /// по умолчанию.
+    static func isShared(_ device: InputDevice) -> Bool {
+        device.isBluetooth || device.isContinuity
     }
 
     static func builtInInput() -> InputDevice? {
@@ -78,73 +107,82 @@ enum AudioDevices {
         outputs().first(where: \.isBuiltIn)
     }
 
-    /// Куда проигрывать короткие сигналы приложения.
-    ///
-    /// `nil` — туда же, куда и всё остальное. Иначе — встроенные динамики:
-    /// это случай, когда вывод по умолчанию стоит на беспроводных наушниках,
-    /// а мак через них молчит. Любой звук, отправленный в такие наушники,
-    /// будит их и отбирает у телефона — ровно то же, что делает микрофон.
-    static func soundOutput() -> InputDevice? {
-        guard let id = defaultOutput() else { return nil }
-        let device = describe(id)
-        guard device.isBluetooth, !isRunning(id) else { return nil }
-        return builtInOutput()
+    /// Стоит ли вывод на беспроводной гарнитуре, которую можно отобрать
+    /// у телефона. По этому признаку приложение решает, можно ли трогать
+    /// громкость и проигрывать свои сигналы.
+    static func outputIsShared() -> Bool {
+        guard let id = defaultOutput() else { return false }
+        return isShared(describe(id))
     }
 
     // MARK: - Решение
 
-    /// Какой микрофон брать под текущую настройку.
-    /// `nil` — оставить системный по умолчанию, ничего не переопределять.
-    static func resolve(_ mode: MicrophoneMode) -> InputDevice? {
-        let list = inputs()
+    /// Устройство, с которого писать.
+    ///
+    /// Три случая, и ни в одном приложение ничего не угадывает:
+    ///
+    /// - `auto` — системный микрофон по умолчанию, но **никогда**
+    ///   беспроводная гарнитура: определить, слушает ли человек через неё мак
+    ///   или телефон, macOS не позволяет (см. `isShared`), а взяв её вслепую,
+    ///   приложение отберёт наушники у телефона. В этом случае — встроенный.
+    /// - `builtIn` — встроенный всегда, без вариантов.
+    /// - конкретное устройство — то, что человек выбрал сам. Выбрал
+    ///   наушники — значит сказал, что они на маке, и вопросов нет.
+    static func selected() -> InputDevice? {
+        resolve(Settings.shared.microphone)
+    }
 
-        switch mode {
-        case .systemDefault:
-            return nil
+    /// То же решение, но для заданного выбора: режим «клавиша на устройство»
+    /// назначает микрофон сочетанием, а не общей настройкой.
+    static func resolve(_ choice: MicrophoneChoice) -> InputDevice? {
+        switch choice {
+        case .auto:
+            guard let currentID = defaultInput(),
+                  let current = inputs().first(where: { $0.id == currentID })
+            else { return builtInInput() }
+            return isShared(current) ? builtInInput() : current
 
         case .builtIn:
-            return list.first(where: \.isBuiltIn)
+            return builtInInput()
 
-        case .specific(let uid):
-            // Устройство могли отключить — тогда молча возвращаемся к системному,
-            // это лучше, чем отказаться записывать.
-            return list.first { $0.uid == uid }
-
-        case .smart:
-            guard let currentID = defaultInput(),
-                  let current = list.first(where: { $0.id == currentID }) else { return nil }
-
-            // Проводное, встроенное, USB — берём как есть: у них нет второго
-            // хозяина, отбирать их не у кого.
-            guard current.isBluetooth || current.isContinuity else { return nil }
-
-            // Наушники берём только если человек и правда слушает через них мак:
-            // они же стоят выходом по умолчанию, и через этот выход прямо сейчас
-            // идёт звук. Если играет телефон, а мак просто подключён к тем же
-            // наушникам, — это не наш случай, трогать их нельзя.
-            if current.isBluetooth, let output = defaultOutput(),
-               describe(output).hardwareID == current.hardwareID, isRunning(output) {
-                return current
-            }
-
-            return list.first(where: \.isBuiltIn) ?? nil
+        case .device(let uid):
+            // Устройство могли отключить — тогда пишем со встроенного, чтобы
+            // диктовка не сорвалась. Выбор при этом не стираем: вернут
+            // наушники — вернётся и он.
+            return inputs().first { $0.uid == uid } ?? builtInInput()
         }
     }
 
-    /// Что именно решил `resolve`, словами — для журнала и диагностики.
+    /// Выбранное устройство пропало из системы.
+    static func selectedIsMissing() -> Bool {
+        guard case .device(let uid) = Settings.shared.microphone else { return false }
+        return !inputs().contains { $0.uid == uid }
+    }
+
+    /// Можно ли трогать устройство вывода: менять на нём громкость
+    /// и проигрывать в него сигналы.
     ///
-    /// Пишется вместе с состоянием вывода: если решение окажется неверным,
-    /// по журналу сразу видно, на чём оно основано, и гадать не придётся.
-    static func explain(_ mode: MicrophoneMode) -> String {
-        let chosen = resolve(mode)
-        let system = defaultInput().map { describe($0).name } ?? "неизвестно"
-        var note = ""
-        if let out = defaultOutput() {
-            note = "; вывод — \(describe(out).name), "
-                 + (isRunning(out) ? "мак через него играет" : "мак через него молчит")
+    /// Можно, если вывод не общий с телефоном — динамики, провод — либо если
+    /// человек сам выбрал эту же гарнитуру микрофоном. Выбрал её — значит
+    /// сказал, что наушники сейчас на маке, и трогать их безопасно.
+    static func mayTouchOutput() -> Bool {
+        guard let outID = defaultOutput() else { return false }
+        let output = describe(outID)
+        guard isShared(output) else { return true }
+        return selected().map { $0.hardwareID == output.hardwareID } ?? false
+    }
+
+    /// Что сейчас выбрано, словами — для журнала и диагностики.
+    static func explain() -> String {
+        let chosen = selected()?.name ?? "встроенный не найден"
+        let mode: String
+        switch Settings.shared.microphone {
+        case .auto: mode = "авто"
+        case .builtIn: mode = "встроенный"
+        case .device: mode = selectedIsMissing() ? "выбранное отключено" : "выбран вручную"
         }
-        guard let chosen else { return "системный по умолчанию (\(system))\(note)" }
-        return "\(chosen.name) (системный — \(system))\(note)"
+        let out = defaultOutput().map { "; вывод — \(describe($0).name)" } ?? ""
+        return "\(chosen) [\(mode)]\(out)"
     }
 
     // MARK: - CoreAudio
@@ -219,40 +257,39 @@ enum AudioDevices {
 }
 
 /// Откуда брать звук.
-enum MicrophoneMode: Equatable {
-    /// Не переключаться на беспроводные наушники, пока человек не слушает
-    /// через них сам мак. Всё остальное — как в системе.
-    case smart
-    /// Всегда встроенный микрофон.
+enum MicrophoneChoice: Equatable {
+    /// Как в системе, но беспроводную гарнитуру не берём.
+    case auto
+    /// Встроенный микрофон всегда.
     case builtIn
-    /// Как в системных настройках звука.
-    case systemDefault
     /// Конкретное устройство по его UID.
-    case specific(String)
+    case device(String)
+
+    /// Значение для меню: пустая строка — авто, `builtin` — встроенный,
+    /// остальное — UID устройства.
+    var tag: String {
+        switch self {
+        case .auto: return ""
+        case .builtIn: return "builtin"
+        case .device(let uid): return uid
+        }
+    }
+
+    init(tag: String) {
+        switch tag {
+        case "": self = .auto
+        case "builtin": self = .builtIn
+        default: self = .device(tag)
+        }
+    }
 }
 
 extension Settings {
-    /// Ключ `audio.micMode`; для `specific` рядом лежит `audio.micDevice`.
-    var microphoneMode: MicrophoneMode {
-        get {
-            switch text("audio.micMode", default: "smart") {
-            case "builtIn": return .builtIn
-            case "system": return .systemDefault
-            case "specific":
-                let uid = text("audio.micDevice")
-                return uid.isEmpty ? .smart : .specific(uid)
-            default: return .smart
-            }
-        }
-        set {
-            switch newValue {
-            case .smart: set("smart", forKey: "audio.micMode")
-            case .builtIn: set("builtIn", forKey: "audio.micMode")
-            case .systemDefault: set("system", forKey: "audio.micMode")
-            case .specific(let uid):
-                set("specific", forKey: "audio.micMode")
-                set(uid, forKey: "audio.micDevice")
-            }
-        }
+    /// Ключ `audio.micDevice`. Хранится UID, а не идентификатор устройства:
+    /// идентификаторы система раздаёт заново при каждом переподключении,
+    /// а UID у наушников постоянный.
+    var microphone: MicrophoneChoice {
+        get { MicrophoneChoice(tag: text("audio.micDevice")) }
+        set { set(newValue.tag, forKey: "audio.micDevice") }
     }
 }
