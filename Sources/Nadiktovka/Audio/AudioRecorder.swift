@@ -21,7 +21,14 @@ final class AudioRecorder {
     /// Текущий уровень звука 0…1 — для индикатора. Вызывается на главном потоке.
     var onLevel: ((Float) -> Void)?
 
-    private let engine = AVAudioEngine()
+    /// Пересоздаётся на каждую запись.
+    ///
+    /// `AVAudioEngine` кэширует параметры устройства и смену этого устройства
+    /// не переживает: после переключения вход перестаёт совпадать с выходом,
+    /// и `start()` отвечает -10868, «формат не поддерживается». Ни `reset()`,
+    /// ни повторное чтение формата не помогают — надёжно только новый движок.
+    /// Стоит это доли миллисекунды, а запись идёт раз в минуту.
+    private var engine = AVAudioEngine()
     private var file: AVAudioFile?
     private var converter: AVAudioConverter?
     private var outputURL: URL?
@@ -46,6 +53,9 @@ final class AudioRecorder {
             throw RecorderError.micDenied
         }
 
+        // Новый движок на каждую запись — см. объявление `engine`.
+        engine = AVAudioEngine()
+
         // Устройство назначаем до первого обращения к формату: движок
         // запрашивает параметры у того устройства, которое стоит в этот момент,
         // и переключать его потом уже поздно.
@@ -53,23 +63,29 @@ final class AudioRecorder {
 
         let input = engine.inputNode
         let inputFormat = input.inputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else {
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw RecorderError.engineFailed("микрофон не отдаёт данные")
         }
 
         // AAC вместо WAV: те же 13 секунд речи весят ~40 КБ вместо 430 КБ,
         // и отправка перестаёт упираться в таймаут на слабой сети.
         let (url, audioFile) = try makeFile()
-        // processingFormat — float32 16 kHz mono; в Int16 файл квантует сам AVAudioFile.
-        guard let conv = AVAudioConverter(from: inputFormat, to: audioFile.processingFormat) else {
-            throw RecorderError.engineFailed("формат микрофона не поддерживается")
-        }
 
         file = audioFile
-        converter = conv
+        converter = nil
         outputURL = url
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        // Формат отводу не задаём — берём `nil`, то есть «спроси у узла сам».
+        //
+        // Раньше сюда передавался формат, прочитанный секундой раньше, и на
+        // беспроводной гарнитуре это роняло приложение: открытие микрофона
+        // переводит наушники в гарнитурный режим, там другая частота, формат
+        // перестаёт совпадать, и `installTap` бросает исключение Objective-C.
+        // Из Swift такое не поймать — процесс просто падал.
+        //
+        // Раз формат теперь известен только в момент прихода данных,
+        // преобразователь создаётся по первому же буферу.
+        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             self?.append(buffer)
         }
 
@@ -105,27 +121,19 @@ final class AudioRecorder {
             return
         }
 
-        // Выходной узел движка отдельно не переключается: на macOS вход и выход
-        // AVAudioEngine — один и тот же HAL-узел, и запись устройства вывода
-        // сбрасывает устройство ввода. Проверено: после такой попытки выбор
-        // микрофона возвращал -10851, а движок — «микрофон не отдаёт данные».
-        var id = device.id
-        let unit = engine.inputNode.audioUnit
-        guard let unit else { return }
+        // Если это и так системный микрофон по умолчанию, ничего не трогаем.
+        // Любое назначение устройства — риск, а тут оно бессмысленно.
+        if AudioDevices.defaultInput() == device.id {
+            Log.write("Микрофон: \(AudioDevices.explain())")
+            return
+        }
 
-        let status = AudioUnitSetProperty(
-            unit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &id,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-
-        if status == noErr {
+        // Переключаем системный микрофон, а не подменяем устройство внутри
+        // движка — см. `AudioDevices.makeDefaultInput`.
+        if AudioDevices.makeDefaultInput(device.id) {
             Log.write("Микрофон: \(AudioDevices.explain())")
         } else {
-            Log.write("Микрофон: не удалось выбрать «\(device.name)» (код \(status)), "
+            Log.write("Микрофон: не удалось переключить на «\(device.name)», "
                       + "остаётся системный")
         }
     }
@@ -189,7 +197,21 @@ final class AudioRecorder {
     }
 
     private func append(_ buffer: AVAudioPCMBuffer) {
-        guard let file, let converter else { return }
+        guard let file else { return }
+
+        // Преобразователь строится по формату первого пришедшего буфера:
+        // до этого момента настоящий формат устройства неизвестен, а на
+        // беспроводной гарнитуре он ещё и меняется при переключении режима.
+        if converter == nil {
+            guard let made = AVAudioConverter(from: buffer.format, to: file.processingFormat) else {
+                Log.write("Формат микрофона не поддерживается: \(buffer.format)")
+                return
+            }
+            converter = made
+            Log.debug("Формат записи: \(Int(buffer.format.sampleRate)) Гц, "
+                      + "\(buffer.format.channelCount) кан.")
+        }
+        guard let converter else { return }
 
         let outFormat = file.processingFormat
         let ratio = outFormat.sampleRate / buffer.format.sampleRate

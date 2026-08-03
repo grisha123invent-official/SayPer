@@ -23,6 +23,7 @@ struct SettingsSectionGeneral: View {
         ("fr", "Français")
     ]
 
+    @State private var showsMore = false
     @State private var routing = Settings.shared.micRouting
     @State private var routes = Settings.shared.hotkeyRoutes
     @State private var devices = AudioDevices.inputs()
@@ -30,9 +31,10 @@ struct SettingsSectionGeneral: View {
     var body: some View {
         SectionScaffold {
             activation
-            duringRecording
-            transcription
-            insertion
+            CardDivider(inset: 0)
+            recordingAndText
+            CardDivider(inset: 0)
+            more
         }
     }
 
@@ -41,25 +43,16 @@ struct SettingsSectionGeneral: View {
     /// Сочетание и режим — одна тема: чем запускается запись.
     private var activation: some View {
         GlassCard("Активация") {
-            // В режиме «на клавише» это поле лишнее: сочетания там задаёт
-            // таблица ниже, и два органа управления одним и тем же путают.
-            if routing == .panel {
-                SettingRow(
-                    "Сочетание",
-                    subtitle: "Кликни по полю и зажми клавиши. Левые и правые различаются"
-                ) {
+            SettingRow("Сочетание") {
                 // Сброс живёт внутри поля, у правого края с отступом 6
                 // (`components.md` §2), и рисует его сам рекордер. Отдельной
                 // кнопкой рядом он сдвигал поле на 28pt в момент появления —
                 // то есть ровно тогда, когда человек целится в клавиши.
-                    HotkeyRecorder(hotkey: $model.hotkey)
-                        .frame(width: 190, height: 28)
-                }
+                HotkeyRecorder(hotkey: $model.hotkey)
+                    .frame(width: 190, height: 28)
             }
 
             RecordingModeRow()
-
-            CardDivider()
 
             SettingRow("Выбор микрофона", subtitle: routing.summary) {
                 SegmentedControl(selection: $routing, options: MicRouting.allCases,
@@ -75,12 +68,11 @@ struct SettingsSectionGeneral: View {
                 hotkeyRoutes
             }
         }
+        .onAppear { devices = AudioDevices.inputs() }
     }
 
-    /// Таблица «сочетание → микрофон».
-    ///
-    /// Первая строка играет роль основного сочетания: без неё записывать
-    /// нечем, поэтому удалить последнюю строку нельзя.
+    /// Таблица «сочетание → микрофон». Первая строка играет роль основного
+    /// сочетания: без неё записывать нечем, поэтому последнюю удалить нельзя.
     private var hotkeyRoutes: some View {
         VStack(alignment: .leading, spacing: Palette.spaceXs) {
             ForEach($routes) { $route in
@@ -99,10 +91,7 @@ struct SettingsSectionGeneral: View {
                         get: { route.deviceTag },
                         set: { route.deviceTag = $0; saveRoutes() }
                     )) {
-                        Text("Автоматически").tag("")
-                        Text("Встроенный").tag("builtin")
-                        Divider()
-                        ForEach(devices.filter { !$0.isBuiltIn }) { device in
+                        ForEach(devices) { device in
                             Text(device.name).tag(device.uid)
                         }
                     }
@@ -132,14 +121,10 @@ struct SettingsSectionGeneral: View {
                 saveRoutes()
             }
 
-            // Про задержку человек должен знать заранее: иначе решит,
-            // что приложение подтормаживает.
             Hint("Если одно сочетание входит в другое — ⌃ и ⌃⇧, — короткое ждёт "
                  + "четверть секунды, прежде чем начать: нажать оба модификатора "
-                 + "одновременно физически нельзя, и без паузы длинное не сработало бы "
-                 + "никогда. У непересекающихся сочетаний задержки нет.")
+                 + "одновременно физически нельзя.")
         }
-        .onAppear { devices = AudioDevices.inputs() }
     }
 
     private func saveRoutes() {
@@ -147,12 +132,78 @@ struct SettingsSectionGeneral: View {
         model.onHotkeyChange?()
     }
 
-    // MARK: - Пока говоришь
+    // MARK: - Запись и текст
 
-    private var duringRecording: some View {
-        GlassCard("Во время записи") {
+    /// То, что трогают. Остальное уехало в «Ещё»: держать четырнадцать строк
+    /// на виду значит заставлять человека каждый раз перечитывать весь экран.
+    private var recordingAndText: some View {
+        GlassCard("Запись и текст") {
             SwitchToggle("Показывать индикатор", isOn: $model.showIndicator)
 
+            SettingRow("Модель") {
+                Picker("", selection: $model.model) {
+                    ForEach(TranscriptionModel.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 260)
+            }
+
+            SettingRow("Язык речи") {
+                Picker("", selection: $model.language) {
+                    ForEach(languages, id: \.0) { code, title in
+                        Text(title).tag(code)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 260)
+            }
+
+            SettingRow("Способ вставки") {
+                Picker("", selection: $model.insertMode) {
+                    ForEach(InsertMode.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 260)
+            }
+        }
+    }
+
+    // MARK: - Редкое
+
+    /// Свёрнуто по умолчанию. Раскрытое состояние не запоминается: настроил
+    /// раз — и снова с глаз долой, ради этого всё и затевалось.
+    private var more: some View {
+        GlassCard("Ещё") {
+            Button {
+                withAnimation(.smooth(duration: 0.22, extraBounce: 0)) { showsMore.toggle() }
+            } label: {
+                HStack(spacing: Palette.spaceXs) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .rotationEffect(.degrees(showsMore ? 90 : 0))
+                        .foregroundStyle(.secondary)
+                    Text(showsMore ? "Свернуть" : "Звук компьютера, словарь, причёсывание")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: Palette.rowHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showsMore {
+                rareSettings
+            }
+        }
+    }
+
+    private var rareSettings: some View {
+        VStack(alignment: .leading, spacing: Palette.spaceCardRows) {
             SettingRow(
                 "Звук компьютера",
                 subtitle: "Музыка и видео лезут в микрофон и портят расшифровку"
@@ -185,40 +236,14 @@ struct SettingsSectionGeneral: View {
                     Settings.shared.duckLevel = newValue
                 }
             }
-        }
-    }
-
-    // MARK: - Как распознаётся
-
-    private var transcription: some View {
-        GlassCard("Расшифровка") {
-            SettingRow("Модель") {
-                Picker("", selection: $model.model) {
-                    ForEach(TranscriptionModel.allCases) { item in
-                        Text(item.title).tag(item)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 260)
-            }
-
-            SettingRow("Язык речи") {
-                Picker("", selection: $model.language) {
-                    ForEach(languages, id: \.0) { code, title in
-                        Text(title).tag(code)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 180)
-            }
-
-            vocabulary
 
             SwitchToggle(
                 "Причёсывать текст",
                 subtitle: "Пунктуация и слова-паразиты, +1 секунда · gpt-4o-mini",
                 isOn: $model.cleanup
             )
+
+            vocabulary
         }
     }
 
@@ -255,21 +280,5 @@ struct SettingsSectionGeneral: View {
             .fieldChrome(isFocused: vocabularyFocused)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Куда попадает
-
-    private var insertion: some View {
-        GlassCard("Вставка") {
-            SettingRow("Способ") {
-                Picker("", selection: $model.insertMode) {
-                    ForEach(InsertMode.allCases) { item in
-                        Text(item.title).tag(item)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 300)
-            }
-        }
     }
 }

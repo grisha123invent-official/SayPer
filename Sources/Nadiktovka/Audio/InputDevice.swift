@@ -47,20 +47,71 @@ struct InputDevice: Identifiable, Equatable {
 enum AudioDevices {
     // MARK: - Перечисление
 
-    /// Микрофоны, с которых действительно можно писать.
+    /// Микрофоны, из которых человек выбирает.
     ///
-    /// Виртуальные устройства и агрегаты отсеиваются: Zoom и Teams заводят
-    /// свои «микрофоны», чтобы прокачивать через себя чужой звук, а
-    /// `CADefaultDeviceAggregate` — служебная сборка самой системы. Записать
-    /// с них голос нельзя, а в списке они путают.
+    /// Пока ровно два вида: беспроводная гарнитура и встроенный микрофон.
+    /// Остальное отсеяно намеренно — микрофон айфона через «Непрерывность»,
+    /// USB-микрофоны, виртуальные устройства Zoom и Teams, служебные агрегаты
+    /// системы. Их поведение ещё не обговорено, а пустой выбор в списке
+    /// путает и ломает правила приглушения.
     static func inputs() -> [InputDevice] {
         all().filter { channels($0, scope: kAudioObjectPropertyScopeInput) > 0 }
             .map(describe)
-            .filter { $0.isRealHardware }
+            .filter { $0.isBuiltIn || $0.isBluetooth }
+    }
+
+    /// Есть ли рядом беспроводная гарнитура — хоть подключённая, хоть просто
+    /// видимая системе.
+    static func hasWirelessInput() -> Bool {
+        inputs().contains(where: \.isBluetooth)
+    }
+
+    /// Можно ли трогать устройство вывода — и громкостью, и своими звуками.
+    ///
+    /// Правила обговорены 3 августа и записаны в CLAUDE.md:
+    ///
+    /// | выбран микрофон | что вокруг | глушим |
+    /// |---|---|---|
+    /// | беспроводная гарнитура | неважно | да |
+    /// | встроенный | рядом есть гарнитура | нет |
+    /// | встроенный | гарнитуры нет | да |
+    ///
+    /// Смысл средней строки: раз гарнитура рядом, человек слушает в неё,
+    /// и в встроенный микрофон из неё ничего не попадает — глушить нечего.
+    ///
+    /// Правило распространяется и на звуковые сигналы приложения. Короткого
+    /// «тинь» на старте записи достаточно, чтобы наушники, подключённые
+    /// и к маку, и к телефону, перескочили на мак и оборвали музыку: сигнал
+    /// уходит в устройство вывода по умолчанию, то есть прямо в них. Решили
+    /// не трогать гарнитуру — значит не трогаем ничем.
+    static func mayTouchOutput() -> Bool {
+        guard let chosen = selected() else { return true }
+        if chosen.isBluetooth { return true }
+        return !hasWirelessInput()
     }
 
     static func defaultInput() -> AudioDeviceID? {
         systemDevice(kAudioHardwarePropertyDefaultInputDevice)
+    }
+
+    /// Делает устройство системным микрофоном по умолчанию.
+    ///
+    /// Так, а не подменой устройства внутри `AVAudioEngine`. Движок на macOS
+    /// держит вход и выход одним узлом и навязанное устройство переваривает
+    /// через раз: `start()` отвечал -10868, «формат не поддерживается», и
+    /// диктовка не начиналась вовсе. Системный выбор он же читает штатно.
+    ///
+    /// Побочное следствие честное и видимое: выбранный в приложении микрофон
+    /// становится микрофоном системы. Это ровно то, что человек и просит,
+    /// и это же видно в системных настройках звука.
+    @discardableResult
+    static func makeDefaultInput(_ id: AudioDeviceID) -> Bool {
+        var addr = address(kAudioHardwarePropertyDefaultInputDevice)
+        var value = id
+        return AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size), &value
+        ) == noErr
     }
 
     static func defaultOutput() -> AudioDeviceID? {
@@ -157,19 +208,6 @@ enum AudioDevices {
     static func selectedIsMissing() -> Bool {
         guard case .device(let uid) = Settings.shared.microphone else { return false }
         return !inputs().contains { $0.uid == uid }
-    }
-
-    /// Можно ли трогать устройство вывода: менять на нём громкость
-    /// и проигрывать в него сигналы.
-    ///
-    /// Можно, если вывод не общий с телефоном — динамики, провод — либо если
-    /// человек сам выбрал эту же гарнитуру микрофоном. Выбрал её — значит
-    /// сказал, что наушники сейчас на маке, и трогать их безопасно.
-    static func mayTouchOutput() -> Bool {
-        guard let outID = defaultOutput() else { return false }
-        let output = describe(outID)
-        guard isShared(output) else { return true }
-        return selected().map { $0.hardwareID == output.hardwareID } ?? false
     }
 
     /// Что сейчас выбрано, словами — для журнала и диагностики.

@@ -107,8 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkeys.onPress = { [weak self] deviceTag in
             guard let self else { return }
-            // Тег приходит только в режиме «клавиша на устройство»: какое
-            // сочетание зажали, с того микрофона и пишем эту фразу.
+            // Тег приходит только в режиме «клавиша на устройство».
             self.deviceForNextRecording = deviceTag
             self.gate.hotkeyPressed()
         }
@@ -266,14 +265,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         button.image?.accessibilityDescription = "SayPer"
 
-        button.contentTintColor = {
-            switch status {
-            case .recording: return .systemRed
-            case .transcribing: return .systemBlue
-            case .failed: return .systemOrange
-            case .idle: return nil
-            }
-        }()
+        // Подкраску не ставим вообще. `contentTintColor` ломал шаблонную
+        // отрисовку: во время записи глиф становился чёрным и на тёмной
+        // строке меню пропадал. Цвет тут и не нужен — состояние видно
+        // по форме: штрихи знака растут с голосом, при расшифровке стоят
+        // вровень, а про ошибку подробно говорит пилюля.
+        button.contentTintColor = nil
 
         statusMenu.lastText = lastText
         // Меню не вешаем на statusItem: клик открывает свою панель, иначе
@@ -410,8 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // в режиме «нажал-нажал» следующее нажатие будет принято за
         // завершение несуществующей записи, и фраза потеряется.
         // Ждать конца прошлой расшифровки больше не нужно: она доедет сама,
-        // в фоне. Занят бывает только микрофон — он один, и вторую запись
-        // поверх первой начать нельзя.
+        // в фоне. Занят бывает только микрофон — он один.
         guard !recorder.isRecording else {
             gate.recordingDidStop()
             return

@@ -221,6 +221,12 @@ final class StatusPanelModel: ObservableObject {
     /// микрофон там назначает само сочетание, и второй орган управления
     /// тем же самым только сбивал бы с толку.
     @Published var showsMicrophoneRow = true
+    /// Устройство, на котором в итоге остановился выбор. Показывается рядом
+    /// с «Автоматически»: без этого непонятно, что именно оно выбрало,
+    /// и слово «автоматически» само по себе ничего не объясняет.
+    @Published var resolvedMicrophone = ""
+    /// Выбрана беспроводная гарнитура: на время записи музыка в ней оборвётся.
+    @Published var microphoneCutsMusic = false
     @Published var todayMinutes = 0.0
     @Published var todayCost = 0.0
     @Published var todayCount = 0
@@ -236,9 +242,18 @@ final class StatusPanelModel: ObservableObject {
         cleanup = Settings.shared.cleanup
         history = Array(HistoryStore.shared.items.prefix(3))
         microphones = AudioDevices.inputs()
-        microphoneTag = Settings.shared.microphone.tag
+        // Прежние «авто» и «встроенный» приводим к настоящему устройству,
+        // иначе галочке в списке не на чем стоять.
+        switch Settings.shared.microphone {
+        case .device(let uid) where microphones.contains(where: { $0.uid == uid }):
+            microphoneTag = uid
+        default:
+            microphoneTag = AudioDevices.builtInInput()?.uid ?? ""
+        }
         microphoneMissing = AudioDevices.selectedIsMissing()
         showsMicrophoneRow = Settings.shared.micRouting == .panel
+        resolvedMicrophone = AudioDevices.selected()?.name ?? "не найден"
+        microphoneCutsMusic = AudioDevices.selected().map(AudioDevices.isShared) ?? false
 
         let today = UsageStore.shared.today
         todayMinutes = today.minutes
@@ -466,6 +481,9 @@ private struct StatusPanelView: View {
         VStack(spacing: 8) {
             if model.showsMicrophoneRow {
                 microphoneRow
+                if model.microphoneCutsMusic {
+                    microphoneWarning
+                }
             }
 
             HStack(spacing: 8) {
@@ -533,13 +551,10 @@ private struct StatusPanelView: View {
                     model.microphoneMissing = AudioDevices.selectedIsMissing()
                 }
             )) {
-                // «Авто» — системный микрофон по умолчанию, но беспроводную
-                // гарнитуру он не берёт: взяв её вслепую, приложение отобрало
-                // бы наушники у телефона.
-                Text("Автоматически").tag("")
-                Text("Встроенный").tag("builtin")
-                Divider()
-                ForEach(model.microphones.filter { !$0.isBuiltIn }) { device in
+                // Только настоящие устройства. «Автоматически» и «Встроенный»
+                // были лишними: первое ничего не объясняло, второе дублировало
+                // микрофон мака, который и так есть в списке.
+                ForEach(model.microphones) { device in
                     Text(device.name).tag(device.uid)
                 }
             }
@@ -547,6 +562,26 @@ private struct StatusPanelView: View {
             // Та же ширина, что у сегментов ниже: колонка контролов
             // держит общую линию.
             .frame(width: 196)
+        }
+    }
+
+    /// Предупреждение под строкой микрофона.
+    ///
+    /// У Bluetooth-гарнитуры два режима — музыкальный и гарнитурный, —
+    /// и одновременно они не работают. Открыв её микрофон, macOS переводит
+    /// наушники в гарнитурный, и музыка обрывается до конца записи. Это
+    /// ограничение самой гарнитуры: так ведёт себя любое приложение, которое
+    /// с неё пишет. Человек должен узнать об этом до первой диктовки,
+    /// а не решить, что приложение сломалось.
+    private var microphoneWarning: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Text("Музыка в наушниках прервётся на время записи — так устроен Bluetooth")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

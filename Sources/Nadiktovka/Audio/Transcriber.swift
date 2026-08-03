@@ -188,6 +188,7 @@ enum Transcriber {
             let startedAt = Date()
             do {
                 let result = try await session.upload(for: request, from: body)
+                Log.debug("Отправка \(body.count) байт, попытка \(attempt)")
                 if attempt > 1 {
                     Log.write("Попытка \(attempt) удалась за "
                               + String(format: "%.1f", Date().timeIntervalSince(startedAt)) + " с")
