@@ -86,8 +86,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        recoverUnfinished()
+
         queue.onReady = { [weak self] text, job in self?.deliver(text, from: job) }
         queue.onFailure = { [weak self] message in self?.fail(message) }
+        queue.onProgress = { [weak self] items in
+            self?.statusPanel.updatePending(items)
+        }
         queue.onActivityChange = { [weak self] busy in
             guard let self else { return }
             if busy {
@@ -478,7 +483,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Готовый текст пришёл и дождался своей очереди.
+    /// Подбирает записи, оставшиеся от прошлого запуска.
+    ///
+    /// Всё, что лежит в кладовке к моменту старта, недоставлено: удачная
+    /// расшифровка убирает файл за собой. Обычно это одна фраза — та,
+    /// на которой приложение перезапустилось.
+    ///
+    /// Ждать нажатия не стали намеренно: человек сказал фразу вслух и уже
+    /// забыл про неё, а строка «нажми, чтобы дошифровать» так и осталась бы
+    /// незамеченной. Дошифровываем сами и кладём в историю — оттуда он
+    /// возьмёт текст, когда хватится.
+    private func recoverUnfinished() {
+        let files = RecordingVault.orphans()
+        guard !files.isEmpty else { return }
+
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
+
+        for url in files {
+            let created = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? Date()
+            // Недельной давности запись человеку уже не нужна, а платить
+            // за неё он всё равно не подписывался.
+            guard created > cutoff else {
+                Log.write("Забытая запись старше недели удалена: \(url.lastPathComponent)")
+                RecordingVault.discard(url)
+                continue
+            }
+
+            RecordingVault.repairIfNeeded(url)
+            let duration = RecordingVault.duration(of: url)
+            // Пустышка в пару сотен байт — это нажатая и сразу отпущенная
+            // клавиша, а не фраза.
+            guard duration > 0.4 else {
+                RecordingVault.discard(url)
+                continue
+            }
+
+            Log.write("Подбираю незаконченную запись: \(url.lastPathComponent), "
+                      + String(format: "%.1f", duration) + " с")
+            queue.enqueue(audio: url, duration: duration,
+                          insertMode: .clipboardOnly, isRecovered: true)
+        }
+    }
+
+    func menuForgetPending(_ id: Int) {
+        queue.forget(id)
+    }
+
     private func deliver(_ text: String, from job: TranscriptionQueue.Job) {
+        // Подобранное после перезапуска в поле не вставляем: с той диктовки
+        // прошло неизвестно сколько, курсор давно в другом окне, и текст
+        // въехал бы в чужой документ. Кладём в историю — оттуда человек
+        // возьмёт его сам, когда увидит.
+        if job.isRecovered {
+            Log.write("Подобрана незаконченная запись: \(text.count) символов, "
+                      + "кладу в историю")
+            TranscriptionBus.publish(TranscriptionRecord(
+                text: text,
+                audioDuration: job.duration,
+                latency: 0,
+                modelID: Settings.shared.model.rawValue,
+                language: Settings.shared.language,
+                cleanupUsed: Settings.shared.cleanup
+            ))
+            indicator.show(.error("Запись после перезапуска — в истории"))
+            return
+        }
+
         Log.write("Расшифровано \(text.count) символов, вставляю "
                   + "способом «\(job.insertMode.title)»")
         lastText = text

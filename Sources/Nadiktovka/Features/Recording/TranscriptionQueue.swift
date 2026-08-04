@@ -28,6 +28,29 @@ final class TranscriptionQueue {
         /// Способ вставки фиксируется в момент записи: авто-стоп подменяет его
         /// одноразово, и к моменту ответа подмена уже не действует.
         let insertMode: InsertMode
+        /// Фраза, подобранная после перезапуска. Её текст никуда не вставляется:
+        /// курсор давно в другом окне, и вставка вслепую хуже потери.
+        var isRecovered = false
+    }
+
+    /// Что происходит с фразой прямо сейчас — для строки в панели.
+    struct Progress: Identifiable, Equatable {
+        enum Stage: Equatable {
+            case sending
+            /// Связь подвела, идёт повтор. Номер попытки — человеку важно
+            /// видеть, что приложение не сдалось, а работает.
+            case retrying(attempt: Int)
+            case failed(String)
+        }
+
+        let id: Int
+        let startedAt: Date
+        let duration: TimeInterval
+        let isRecovered: Bool
+        /// Файл записи: по «убрать» его надо стереть, иначе фраза вернётся
+        /// при следующем запуске как недоставленная.
+        let audio: URL
+        var stage: Stage
     }
 
     /// Что делать с готовым текстом. Вызывается строго по порядку записей.
@@ -37,12 +60,20 @@ final class TranscriptionQueue {
     /// Меняется, когда очередь становится пустой или снова непустой:
     /// по нему приложение показывает и прячет пилюлю.
     var onActivityChange: ((Bool) -> Void)?
+    /// Список того, что сейчас в работе. Дёргается на каждое изменение:
+    /// панель показывает эти строки вперемешку с готовыми расшифровками,
+    /// чтобы было видно — запись не потерялась, она едет.
+    var onProgress: (([Progress]) -> Void)?
 
     private var nextID = 0
     private var nextToDeliver = 0
     private var tasks: [Int: Task<Void, Never>] = [:]
     /// Ответы, пришедшие раньше своей очереди, вместе со своими фразами.
     private var ready: [Int: (text: String, job: Job)] = [:]
+    /// Состояние каждой фразы в работе. Провалившиеся остаются здесь,
+    /// пока человек не уберёт их сам: молча исчезнувшая фраза читается
+    /// как потерянная.
+    private var progress: [Int: Progress] = [:]
 
     var isEmpty: Bool { tasks.isEmpty }
 
@@ -54,12 +85,18 @@ final class TranscriptionQueue {
 
     private var oldestStart: Date?
 
-    func enqueue(audio: URL, duration: TimeInterval, insertMode: InsertMode) {
+    func enqueue(audio: URL, duration: TimeInterval, insertMode: InsertMode,
+                 isRecovered: Bool = false) {
         let job = Job(
             id: nextID, audio: audio, duration: duration,
-            startedAt: Date(), insertMode: insertMode
+            startedAt: Date(), insertMode: insertMode, isRecovered: isRecovered
         )
         nextID += 1
+
+        progress[job.id] = Progress(id: job.id, startedAt: job.startedAt,
+                                    duration: duration, isRecovered: isRecovered,
+                                    audio: audio, stage: .sending)
+        publishProgress()
 
         if tasks.isEmpty {
             oldestStart = job.startedAt
@@ -77,6 +114,8 @@ final class TranscriptionQueue {
         for task in tasks.values { task.cancel() }
         tasks.removeAll()
         ready.removeAll()
+        progress.removeAll()
+        publishProgress()
         // Хвост очереди отменён — следующая фраза начнёт нумерацию заново,
         // иначе она встала бы в ожидание отменённых предшественниц навсегда.
         nextToDeliver = nextID
@@ -90,13 +129,22 @@ final class TranscriptionQueue {
     private func run(_ job: Job) async {
         defer {
             tasks[job.id] = nil
-            try? FileManager.default.removeItem(at: job.audio)
             finishIfDrained()
         }
 
+        // Отправляем сжатую копию, а исходник держим до подтверждения:
+        // пока текст не доехал, запись — единственное, что есть.
+        let packed = RecordingVault.compressed(job.audio)
+        defer { if packed != job.audio { try? FileManager.default.removeItem(at: packed) } }
+
         do {
-            let text = try await Transcriber.transcribe(fileURL: job.audio)
+            let text = try await Transcriber.transcribe(fileURL: packed) { [weak self] attempt in
+                Task { @MainActor in self?.note(job.id, .retrying(attempt: attempt)) }
+            }
             guard !Task.isCancelled else { return }
+            RecordingVault.discard(job.audio)
+            progress[job.id] = nil
+            publishProgress()
             ready[job.id] = (text, job)
             deliverReady()
         } catch {
@@ -108,7 +156,14 @@ final class TranscriptionQueue {
 
             if cancelled {
                 Log.write("Расшифровка отменена")
+                RecordingVault.discard(job.audio)
+                progress[job.id] = nil
+                publishProgress()
             } else {
+                // Файл не трогаем: связь могла отвалиться, а запись —
+                // единственное, что осталось от сказанного. Подберём
+                // при следующем запуске.
+                note(job.id, .failed(error.localizedDescription))
                 onFailure?(error.localizedDescription)
             }
             // Провалившаяся фраза не должна держать следующие: пропускаем её
@@ -127,6 +182,32 @@ final class TranscriptionQueue {
             nextToDeliver += 1
             onReady?(entry.text, entry.job)
         }
+    }
+
+    /// Отметить новое состояние фразы и показать его.
+    @MainActor
+    private func note(_ id: Int, _ stage: Progress.Stage) {
+        guard var entry = progress[id], entry.stage != stage else { return }
+        entry.stage = stage
+        progress[id] = entry
+        publishProgress()
+    }
+
+    /// Убрать провалившуюся фразу из панели вместе с её записью.
+    ///
+    /// Без `@MainActor`: зовётся из панели, которая и так живёт на главной
+    /// очереди, а пометка потянула бы за собой весь `AppDelegate`.
+    func forget(_ id: Int) {
+        if let entry = progress[id] {
+            RecordingVault.discard(entry.audio)
+            Log.write("Недоставленная фраза убрана вручную вместе с записью")
+        }
+        progress[id] = nil
+        publishProgress()
+    }
+
+    private func publishProgress() {
+        onProgress?(progress.values.sorted { $0.startedAt < $1.startedAt })
     }
 
     @MainActor

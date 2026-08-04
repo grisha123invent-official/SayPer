@@ -67,7 +67,11 @@ enum Transcriber {
         }
     }
 
-    static func transcribe(fileURL: URL) async throws -> String {
+    /// `onRetry` дёргается перед повторной попыткой отправки — по нему панель
+    /// показывает «связь подвела, повторяю». Молчаливый повтор выглядит
+    /// как зависание, и человек начинает диктовать заново поверх работающего.
+    static func transcribe(fileURL: URL,
+                           onRetry: ((Int) -> Void)? = nil) async throws -> String {
         let settings = Settings.shared
         guard let apiKey = settings.apiKey else { throw TranscribeError.noAPIKey }
 
@@ -109,7 +113,7 @@ enum Transcriber {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await upload(request, body: body)
+        let (data, response) = try await upload(request, body: body, onRetry: onRetry)
         try check(response: response, data: data)
 
         let text = (String(data: data, encoding: .utf8) ?? "")
@@ -178,7 +182,8 @@ enum Transcriber {
     /// уже мёртв — а URLSession об этом не знает и пишет в пустоту до таймаута.
     /// Ценой лишнего рукопожатия TLS, то есть четверти секунды, снимается
     /// минута ожидания.
-    private static func upload(_ request: URLRequest, body: Data) async throws -> (Data, URLResponse) {
+    private static func upload(_ request: URLRequest, body: Data,
+                               onRetry: ((Int) -> Void)? = nil) async throws -> (Data, URLResponse) {
         var lastError: Error?
 
         for attempt in 1...3 {
@@ -199,6 +204,7 @@ enum Transcriber {
                 Log.write("Попытка \(attempt): сеть подвела (\(error.code.rawValue)) через "
                           + String(format: "%.1f", Date().timeIntervalSince(startedAt))
                           + " с, пробую заново")
+                onRetry?(attempt + 1)
             }
         }
 

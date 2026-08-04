@@ -67,8 +67,6 @@ final class AudioRecorder {
             throw RecorderError.engineFailed("микрофон не отдаёт данные")
         }
 
-        // AAC вместо WAV: те же 13 секунд речи весят ~40 КБ вместо 430 КБ,
-        // и отправка перестаёт упираться в таймаут на слабой сети.
         let (url, audioFile) = try makeFile()
 
         file = audioFile
@@ -165,25 +163,18 @@ final class AudioRecorder {
         try? FileManager.default.removeItem(at: result.url)
     }
 
-    /// Пишем в m4a; если система почему-то не даёт кодировать AAC,
-    /// откатываемся на обычный WAV — лучше тяжёлый файл, чем сорванная запись.
+    /// Пишем несжатым WAV в кладовку записей.
+    ///
+    /// Раньше писали сразу в m4a — он в десять раз легче, и отправка
+    /// не упиралась в таймаут на слабой сети. Но у m4a оглавление
+    /// дописывается при закрытии файла: запись, оборванная перезапуском
+    /// посреди фразы, не открывалась потом ничем, и наговоренное пропадало.
+    /// У WAV данные идут сразу за заголовком — оборванный файл чинится
+    /// двумя числами, см. `RecordingVault.repairIfNeeded`.
+    ///
+    /// Выигрыш в весе никуда не делся: сжимаем перед самой отправкой.
     private func makeFile() throws -> (URL, AVAudioFile) {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nadiktovka-\(UUID().uuidString)")
-
-        let compressed = base.appendingPathExtension("m4a")
-        let aac: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 16_000.0,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 24_000
-        ]
-        if let file = try? AVAudioFile(forWriting: compressed, settings: aac) {
-            return (compressed, file)
-        }
-
-        Log.write("AAC недоступен, пишу WAV")
-        let raw = base.appendingPathExtension("wav")
+        let url = RecordingVault.newRecordingURL()
         let pcm: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 16_000.0,
@@ -193,7 +184,7 @@ final class AudioRecorder {
             AVLinearPCMIsBigEndianKey: false,
             AVLinearPCMIsNonInterleaved: false
         ]
-        return (raw, try AVAudioFile(forWriting: raw, settings: pcm))
+        return (url, try AVAudioFile(forWriting: url, settings: pcm))
     }
 
     private func append(_ buffer: AVAudioPCMBuffer) {

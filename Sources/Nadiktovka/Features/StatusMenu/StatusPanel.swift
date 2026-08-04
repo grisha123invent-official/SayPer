@@ -24,6 +24,13 @@ final class StatusPanelController {
 
     var isOpen: Bool { panel?.isVisible ?? false }
 
+    /// Что сейчас в работе. Приходит из очереди на каждое изменение —
+    /// панель может быть открыта в этот момент, и строка должна меняться
+    /// у человека на глазах, а не при следующем открытии.
+    func updatePending(_ items: [TranscriptionQueue.Progress]) {
+        model.pending = items
+    }
+
     func toggle(from button: NSStatusBarButton) {
         isOpen ? close() : open(from: button)
     }
@@ -199,6 +206,8 @@ protocol StatusPanelActions: AnyObject {
     func menuShowDiagnostics()
     func menuRequestKeyboardAccess()
     func menuSetActivation(_ mode: HotkeyActivation)
+    /// Убрать из списка фразу, которая так и не доехала, вместе с записью.
+    func menuForgetPending(_ id: Int)
     func menuQuit()
 }
 
@@ -211,6 +220,10 @@ final class StatusPanelModel: ObservableObject {
     @Published var hotkey = ""
     @Published var cleanup = false
     @Published var history: [TranscriptionRecord] = []
+    /// Фразы, которые ещё едут. Стоят в том же списке, что и готовые:
+    /// человеку важно видеть не «сколько их», а какая именно застряла
+    /// и на чём — иначе он решает, что запись пропала, и диктует заново.
+    @Published var pending: [TranscriptionQueue.Progress] = []
     /// Подключённые сейчас микрофоны и выбранный из них. Перечитываются
     /// при каждом открытии панели: наушники подключают и отключают, а панель
     /// живёт между показами.
@@ -276,7 +289,7 @@ private struct StatusPanelView: View {
 
             header
 
-            if !model.history.isEmpty {
+            if !model.history.isEmpty || !model.pending.isEmpty {
                 recent
             }
 
@@ -403,6 +416,13 @@ private struct StatusPanelView: View {
                 .padding(.horizontal, 2)
 
             VStack(spacing: 0) {
+                // Работающие сверху: они меняются, за ними и следят.
+                ForEach(model.pending) { item in
+                    PendingRow(item: item) {
+                        model.actions?.menuForgetPending(item.id)
+                    }
+                }
+
                 ForEach(model.history) { record in
                     RecentRow(record: record) {
                         model.actions?.menuInsertAgain(record.text)
@@ -425,6 +445,82 @@ private struct StatusPanelView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Palette.rimGlass, lineWidth: 1)
             )
+        }
+    }
+
+    /// Строка фразы, которая ещё не доехала.
+    ///
+    /// Текста у неё пока нет, поэтому слева — длительность записи: по ней
+    /// человек узнаёт свою фразу («та, длинная»). Справа вместо времени —
+    /// что с ней происходит.
+    private struct PendingRow: View {
+        let item: TranscriptionQueue.Progress
+        let forget: () -> Void
+
+        @State private var hovered = false
+
+        var body: some View {
+            HStack(spacing: 8) {
+                icon
+                Text(Self.length(item.duration))
+                    .font(.system(size: 12).monospacedDigit())
+                Text(status)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 4)
+
+                if case .failed = item.stage {
+                    Button(action: forget) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Убрать из списка")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(hovered ? Palette.surfaceRowHover : .clear)
+            )
+            .onHover { hovered = $0 }
+        }
+
+        @ViewBuilder
+        private var icon: some View {
+            switch item.stage {
+            case .sending:
+                ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12)
+            case .retrying:
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.warning)
+                    .frame(width: 12)
+            case .failed:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.warning)
+                    .frame(width: 12)
+            }
+        }
+
+        private var status: String {
+            switch item.stage {
+            case .sending:
+                return item.isRecovered ? "подобрана после перезапуска" : "расшифровываю"
+            case .retrying(let attempt):
+                return "связь подвела, повторяю (\(attempt) из 3)"
+            case .failed(let message):
+                return "не дошло: \(message)"
+            }
+        }
+
+        private static func length(_ seconds: TimeInterval) -> String {
+            let whole = Int(seconds.rounded())
+            return String(format: "%d:%02d", whole / 60, whole % 60)
         }
     }
 
