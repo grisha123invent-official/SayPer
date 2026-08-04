@@ -53,7 +53,7 @@
 </table>
 
 <div align="center">
-<img src="docs/pill.jpg" alt="Индикатор записи" width="420">
+<img src="docs/pill.png" alt="Индикатор записи" width="520">
 </div>
 
 ---

@@ -57,7 +57,7 @@ transcribed in parallel but inserted in the order you said them.
 </table>
 
 <div align="center">
-<img src="docs/pill.jpg" alt="Recording indicator" width="420">
+<img src="docs/pill.png" alt="Recording indicator" width="520">
 </div>
 
 ---
