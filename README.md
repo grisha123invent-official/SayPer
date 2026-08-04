@@ -31,7 +31,7 @@ The app is signed but **not notarised by Apple** (notarisation needs a paid Deve
    xattr -d com.apple.quarantine 
    ```
 
-3. **Drag the downloaded file from Finder straight into the Terminal window.** Its full path appears by itself — it doesn't matter where the file is or what it's called. This is the point of dragging: if you downloaded twice, macOS named the second copy `SayPer-1.0-beta.1 2.dmg`, and typing that by hand is asking for trouble.
+3. **Drag the downloaded file from Finder straight into the Terminal window.** Its full path appears by itself — it doesn't matter where the file is or what it's called. This is the point of dragging: if you downloaded twice, macOS named the second copy `SayPer-1.0 2.dmg`, and typing that by hand is asking for trouble.
 4. Press **Enter**.
 
 Now open the image, drag SayPer into Applications and launch it — no warnings at all. Clearing the quarantine on the image clears it for the app inside too, so the security dialog never appears.
