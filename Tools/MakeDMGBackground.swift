@@ -1,11 +1,16 @@
 import AppKit
 import Foundation
 
-// Фон окна DMG: подсказка «перетащи сюда» и предупреждение о первом запуске.
+// Фон окна DMG.
 //
-// Предупреждение стоит именно здесь, а не только в README: без подписи Apple
-// первый запуск macOS блокирует, и человек, не прочитавший README, решит,
-// что программа сломана. Окно установки он не прочитать не может.
+// Иконки приложения и папки «Программы» сюда не рисуются: их ставит Finder
+// по координатам из build.sh, и нарисованная копия оказалась бы рядом
+// с настоящей. Здесь только сцена вокруг них.
+//
+// Предупреждение о первом запуске стоит именно в окне установки, а не только
+// в README: без заверения Apple первый запуск macOS блокирует, и человек,
+// не читавший README, решит, что программа сломана. Окно установки он
+// не прочитать не может.
 //
 // Рисуется в двойном разрешении и сохраняется как @2x — иначе на Retina фон мыльный.
 
@@ -20,12 +25,21 @@ let appIconCenter = CGPoint(x: 165, y: height - 205)
 let folderIconCenter = CGPoint(x: 455, y: height - 205)
 
 func rgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
-    NSColor(
-        srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
-        green: CGFloat((hex >> 8) & 0xFF) / 255,
-        blue: CGFloat(hex & 0xFF) / 255,
-        alpha: alpha
-    )
+    NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
+}
+
+let violet = rgb(0x6D5BFF)
+let cyan = rgb(0x3FD8E8)
+
+/// Смешать два цвета: волна по дороге меняет цвет с голоса на текст.
+func blend(_ a: NSColor, _ b: NSColor, _ t: CGFloat) -> NSColor {
+    let x = a.usingColorSpace(.sRGB)!, y = b.usingColorSpace(.sRGB)!
+    return NSColor(srgbRed: x.redComponent + (y.redComponent - x.redComponent) * t,
+                   green: x.greenComponent + (y.greenComponent - x.greenComponent) * t,
+                   blue: x.blueComponent + (y.blueComponent - x.blueComponent) * t,
+                   alpha: 0.95)
 }
 
 // Рисуем прямо в битмап нужного размера, а не через `lockFocus`: тот берёт
@@ -43,85 +57,111 @@ NSGraphicsContext.current = context
 context.cgContext.scaleBy(x: scale, y: scale)
 context.imageInterpolation = .high
 
-// Подложка: почти чёрная с холодным подсветом сверху — под цвет иконки.
-NSGradient(colors: [rgb(0x1A1A20), rgb(0x0B0B0E)])?
-    .draw(in: NSRect(x: 0, y: 0, width: width, height: height), angle: -90)
-
-// Мягкое пятно за иконкой приложения: взгляд идёт слева направо, и начинать
-// он должен с того, что перетаскивают.
-// Именно `draw(fromCenter:...)`: вариант с прямоугольником обрезает
-// градиент по его границам, и вместо пятна получается светлый квадрат.
-let glowRadius: CGFloat = 210
-NSGradient(colors: [rgb(0x6D5BFF, 0.22), rgb(0x6D5BFF, 0)])?.draw(
-    fromCenter: appIconCenter, radius: 0,
-    toCenter: appIconCenter, radius: glowRadius,
-    options: []
-)
-
-func draw(_ text: String, at point: NSPoint, size: CGFloat, weight: NSFont.Weight,
-          color: NSColor, align: NSTextAlignment = .center, width boxWidth: CGFloat = width) {
+func text(_ string: String, at point: NSPoint, size: CGFloat, weight: NSFont.Weight,
+          color: NSColor, align: NSTextAlignment = .center,
+          width boxWidth: CGFloat = width, tracking: CGFloat = 0, lineHeight: CGFloat = 0) {
     let style = NSMutableParagraphStyle()
     style.alignment = align
-    let attributed = NSAttributedString(string: text, attributes: [
+    if lineHeight > 0 { style.lineSpacing = lineHeight }
+    var attrs: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: size, weight: weight),
         .foregroundColor: color,
         .paragraphStyle: style
-    ])
-    let height = attributed.boundingRect(
+    ]
+    if tracking != 0 { attrs[.kern] = tracking }
+    let attributed = NSAttributedString(string: string, attributes: attrs)
+    let boxHeight = attributed.boundingRect(
         with: NSSize(width: boxWidth, height: .greatestFiniteMagnitude),
         options: [.usesLineFragmentOrigin]
     ).height
-    attributed.draw(with: NSRect(x: point.x, y: point.y - height, width: boxWidth, height: height),
+    attributed.draw(with: NSRect(x: point.x, y: point.y - boxHeight,
+                                 width: boxWidth, height: boxHeight),
                     options: [.usesLineFragmentOrigin])
 }
 
-draw("SayPer", at: NSPoint(x: 0, y: height - 46), size: 26, weight: .semibold, color: .white)
-draw("Перетащи значок в «Программы»", at: NSPoint(x: 0, y: height - 78),
-     size: 13, weight: .regular, color: rgb(0xFFFFFF, 0.55))
+/// Мягкое цветное пятно.
+///
+/// Именно `draw(fromCenter:...)`: вариант с прямоугольником обрезает градиент
+/// по его границам, и вместо пятна получается светлый квадрат.
+func blob(_ center: CGPoint, _ radius: CGFloat, _ color: NSColor, _ alpha: CGFloat) {
+    NSGradient(colors: [color.withAlphaComponent(alpha), color.withAlphaComponent(0)])?
+        .draw(fromCenter: center, radius: 0, toCenter: center, radius: radius, options: [])
+}
 
-// Стрелка между иконками. Рисуется от края одной подписи до края другой,
-// чтобы не лезть под текст под иконками.
-let arrowY = appIconCenter.y
-let arrowStart = appIconCenter.x + 92
-let arrowEnd = folderIconCenter.x - 92
+/// Стеклянная плита — тот же приём, что в интерфейсе самого приложения.
+///
+/// Настоящего преломления в картинке не сделать, но полупрозрачная заливка,
+/// блик по верхней кромке и просвечивающие сквозь неё цветные пятна дают
+/// достаточно, чтобы плоскость читалась стеклом. Без блика она выглядит
+/// просто серой плашкой.
+func glass(_ rect: NSRect, radius: CGFloat) {
+    let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
 
-let shaft = NSBezierPath()
-shaft.move(to: NSPoint(x: arrowStart, y: arrowY))
-shaft.line(to: NSPoint(x: arrowEnd - 12, y: arrowY))
-shaft.lineWidth = 2
-shaft.lineCapStyle = .round
-rgb(0xFFFFFF, 0.30).setStroke()
-shaft.stroke()
+    NSGraphicsContext.saveGraphicsState()
+    path.addClip()
+    NSGradient(colors: [rgb(0xFFFFFF, 0.15), rgb(0xFFFFFF, 0.03)])?.draw(in: rect, angle: -90)
+    rgb(0xFFFFFF, 0.5).setFill()
+    NSBezierPath(roundedRect: NSRect(x: rect.minX + radius * 0.7, y: rect.maxY - 1.4,
+                                     width: rect.width - radius * 1.4, height: 1.4),
+                 xRadius: 0.7, yRadius: 0.7).fill()
+    NSGraphicsContext.restoreGraphicsState()
 
-let head = NSBezierPath()
-head.move(to: NSPoint(x: arrowEnd - 16, y: arrowY + 7))
-head.line(to: NSPoint(x: arrowEnd, y: arrowY))
-head.line(to: NSPoint(x: arrowEnd - 16, y: arrowY - 7))
-head.lineWidth = 2
-head.lineCapStyle = .round
-head.lineJoinStyle = .round
-rgb(0xFFFFFF, 0.45).setStroke()
-head.stroke()
+    let rim = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+                           xRadius: radius, yRadius: radius)
+    rim.lineWidth = 1
+    rgb(0xFFFFFF, 0.16).setStroke()
+    rim.stroke()
+}
 
-// Плашка с предупреждением о первом запуске — внизу, во всю ширину.
-let noticeRect = NSRect(x: 40, y: 28, width: width - 80, height: 74)
-let noticePath = NSBezierPath(roundedRect: noticeRect, xRadius: 12, yRadius: 12)
-rgb(0xFFFFFF, 0.05).setFill()
-noticePath.fill()
-rgb(0xFFB35C, 0.30).setStroke()
-noticePath.lineWidth = 1
-noticePath.stroke()
+// Подложка и цветные пятна: фиолетовое у приложения, бирюзовое у цели.
+NSGradient(colors: [rgb(0x161A2B), rgb(0x07080D)])?
+    .draw(in: NSRect(x: 0, y: 0, width: width, height: height), angle: -90)
+blob(CGPoint(x: 120, y: height - 120), 300, violet, 0.35)
+blob(CGPoint(x: 520, y: 120), 280, cyan, 0.16)
 
-draw("Первый запуск macOS заблокирует", at: NSPoint(x: noticeRect.minX + 18, y: noticeRect.maxY - 14),
-     size: 12, weight: .semibold, color: rgb(0xFFB35C), align: .left,
-     width: noticeRect.width - 36)
-draw("""
-     Приложение подписано, но не заверено Apple. Открой Системные настройки → \
-     Конфиденциальность и безопасность и нажми «Всё равно открыть».
-     """,
-     at: NSPoint(x: noticeRect.minX + 18, y: noticeRect.maxY - 34),
-     size: 11.5, weight: .regular, color: rgb(0xFFFFFF, 0.52), align: .left,
-     width: noticeRect.width - 36)
+glass(NSRect(x: 48, y: appIconCenter.y - 96, width: width - 96, height: 176), radius: 26)
+
+// Цель размечена цветом: свечение и пунктирное кольцо вокруг папки.
+// Стрелки нет намеренно — направление уже задаёт волна, которая от голоса
+// слева переходит в цвет цели справа.
+blob(folderIconCenter, 90, cyan, 0.30)
+let ring = NSBezierPath(ovalIn: NSRect(x: folderIconCenter.x - 74, y: folderIconCenter.y - 74,
+                                       width: 148, height: 148))
+ring.lineWidth = 1.5
+ring.setLineDash([5, 7], count: 2, phase: 0)
+cyan.withAlphaComponent(0.55).setStroke()
+ring.stroke()
+
+// Волна: голос слева затухает в текст справа — это и есть то, что делает
+// программа, и заодно рифмуется со штрихами в самом значке.
+let baseY = appIconCenter.y
+var x = appIconCenter.x + 80
+var barIndex = 0
+while x < folderIconCenter.x - 86 {
+    let progress = (x - appIconCenter.x - 80) / (folderIconCenter.x - appIconCenter.x - 166)
+    let wiggle = abs(sin(Double(barIndex) * 1.1)) + 0.25 * abs(sin(Double(barIndex) * 2.7))
+    let barHeight = max(4, CGFloat(wiggle) * 36 * (1 - progress * 0.8) + 4)
+    blend(violet, cyan, progress).setFill()
+    NSBezierPath(roundedRect: NSRect(x: x, y: baseY - barHeight / 2, width: 3.5, height: barHeight),
+                 xRadius: 1.75, yRadius: 1.75).fill()
+    x += 9.5
+    barIndex += 1
+}
+
+text("SayPer", at: NSPoint(x: 0, y: height - 40), size: 30, weight: .semibold,
+     color: .white, tracking: -0.4)
+text("Голос становится текстом", at: NSPoint(x: 0, y: height - 84),
+     size: 13, weight: .regular, color: rgb(0xFFFFFF, 0.5))
+
+// Низ обычным текстом, без второй стеклянной плашки: два одинаковых предмета
+// на одном экране спорят друг с другом, и плита под иконками перестаёт быть
+// главной.
+text("Перетащи значок в «Программы»", at: NSPoint(x: 0, y: 104),
+     size: 13, weight: .semibold, color: .white)
+text("Первый запуск macOS заблокирует: Настройки → Конфиденциальность "
+     + "и безопасность → «Всё равно открыть»",
+     at: NSPoint(x: 80, y: 78), size: 10.5, weight: .regular,
+     color: rgb(0xFFFFFF, 0.36), width: width - 160, lineHeight: 2)
 
 NSGraphicsContext.restoreGraphicsState()
 
