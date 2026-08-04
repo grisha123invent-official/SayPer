@@ -21,6 +21,21 @@ final class AudioRecorder {
     /// Текущий уровень звука 0…1 — для индикатора. Вызывается на главном потоке.
     var onLevel: ((Float) -> Void)?
 
+    /// Устройства переключились посреди записи.
+    ///
+    /// Подключение или пропажа любого устройства — наушников, монитора
+    /// с колонками, гарнитуры — заставляет `AVAudioEngine` перестроиться:
+    /// у входного узла меняется формат, а установленный отвод перестаёт
+    /// отдавать данные. Само приложение об этом не узнаёт и продолжает
+    /// считать, что пишет, — в файл при этом больше ничего не попадает.
+    ///
+    /// Замерено на живой записи: человек говорил 27 секунд, в файле оказалось
+    /// 9.6, и Whisper честно расшифровал только их. Две трети сказанного
+    /// пропадали молча.
+    ///
+    /// Поэтому о перестройке сообщаем наружу, а не пытаемся пережить её тихо.
+    var onDevicesChanged: (() -> Void)?
+
     /// Пересоздаётся на каждую запись.
     ///
     /// `AVAudioEngine` кэширует параметры устройства и смену этого устройства
@@ -34,6 +49,7 @@ final class AudioRecorder {
     private var outputURL: URL?
     private(set) var isRecording = false
     private var startedAt: Date?
+    private var configObserver: NSObjectProtocol?
 
     static func requestMicrophoneAccess() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -101,6 +117,16 @@ final class AudioRecorder {
 
         isRecording = true
         startedAt = Date()
+
+        // Подписка после успешного старта: до него движок ещё не тот, за чьей
+        // перестройкой мы следим, а порядок вызовов выше трогать нельзя.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isRecording else { return }
+            Log.write("Устройства переключились посреди записи — закрываю то, что успел")
+            self.onDevicesChanged?()
+        }
     }
 
     /// Назначает движку конкретное устройство ввода.
@@ -141,6 +167,11 @@ final class AudioRecorder {
     func stop() -> (url: URL, duration: TimeInterval)? {
         guard isRecording else { return nil }
         isRecording = false
+
+        if let configObserver {
+            NotificationCenter.default.removeObserver(configObserver)
+            self.configObserver = nil
+        }
 
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()

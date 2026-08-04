@@ -71,6 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         renderStatusItem()
 
+        // Устройства переключились посреди записи: дописываем и отправляем то,
+        // что успели, вместо того чтобы молча писать в мёртвый отвод.
+        recorder.onDevicesChanged = { [weak self] in
+            self?.finishRecording(devicesChanged: true)
+        }
+
         recorder.onLevel = { [weak self] level in
             guard let self else { return }
             self.indicator.update(level: level)
@@ -450,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status = .idle
     }
 
-    private func finishRecording() {
+    private func finishRecording(devicesChanged: Bool = false) {
         // Звук возвращаем сразу после остановки записи: пока идёт расшифровка,
         // микрофон уже не слушает и глушить нечего.
         OutputDucker.restore()
@@ -480,6 +486,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // может уже принять следующую фразу с обычным способом.
         let insertMode = gate.consumeInsertModeOverride() ?? Settings.shared.insertMode
         queue.enqueue(audio: result.url, duration: result.duration, insertMode: insertMode)
+
+        // Предупреждение показываем последним — постановка в очередь тут же
+        // выводит на пилюлю «расшифровываю», и сказанное раньше стёрлось бы,
+        // не успев прочитаться. Молчать здесь нельзя: человек решит, что это
+        // расшифровка плохая, а не запись оборвалась.
+        if devicesChanged {
+            indicator.show(.error("Устройство переключилось, записал "
+                                  + "\(Int(result.duration)) с"))
+        }
     }
 
     /// Готовый текст пришёл и дождался своей очереди.
