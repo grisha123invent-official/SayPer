@@ -38,6 +38,7 @@ final class RecordingIndicator {
         guard Settings.shared.showIndicator else { return }
 
         let panel = self.panel ?? makePanel()
+        applySpaceBehavior(to: panel)
         model.state = state
         model.startRim()
         // Прозрачное стекло само по себе бесцветно — состояние в нём читается
@@ -57,6 +58,9 @@ final class RecordingIndicator {
         } else {
             panel.orderFrontRegardless()
         }
+
+        Log.debug("Пилюля: \(panel.isOnActiveSpace ? "на текущем столе" : "НА ЧУЖОМ СТОЛЕ")"
+                  + ", видимость \(panel.isVisible)")
 
         if case .error = state {
             hideTimer = Timer.scheduledTimer(withTimeInterval: 3.5, repeats: false) { [weak self] _ in
@@ -151,11 +155,30 @@ final class RecordingIndicator {
         panel.hasShadow = false
         panel.level = .statusBar
         panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.hidesOnDeactivate = false
+        applySpaceBehavior(to: panel)
 
         self.panel = panel
         return panel
+    }
+
+    /// Показываться на любом рабочем столе, включая полноэкранные.
+    ///
+    /// Раньше в наборе был ещё `.stationary`, и пилюля не доезжала до чужого
+    /// стола: замерено наблюдением за окном — во время диктовки в браузере,
+    /// открытом на своём столе, окно существовало, лежало на своём слое
+    /// и правильного размера, но система ни разу не показывала его на экране,
+    /// а координаты уводила за левый край на ширину экрана — так она сообщает
+    /// об окнах с другого стола. `.stationary` — это про Exposé, и он попадает
+    /// в ту же группу поведения, что «обычное окно, которым распоряжаются
+    /// рабочие столы». В паре с «показывать везде» он и запирал пилюлю там,
+    /// где её создали, — обычно на столе с окном настроек.
+    ///
+    /// Набор переустанавливается на каждом показе, а не только при создании:
+    /// окно живёт всё время работы приложения, а рабочие столы человек
+    /// заводит и закрывает когда хочет.
+    private func applySpaceBehavior(to panel: NSPanel) {
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
 
     private func reflow() {
