@@ -36,6 +36,18 @@ final class AudioRecorder {
     /// Поэтому о перестройке сообщаем наружу, а не пытаемся пережить её тихо.
     var onDevicesChanged: (() -> Void)?
 
+    /// Микрофон открылся, но не отдал ни одного кадра.
+    ///
+    /// Так бывает после того, как рядом дёрнулось устройство: движок
+    /// запускается без ошибки, а вход остаётся мёртвым. Замерено на живой
+    /// записи: человек говорил 17 секунд, в файле оказалось 4096 байт —
+    /// один заголовок. Узнавал он об этом только в конце, когда мысль уже
+    /// была сказана в пустоту.
+    ///
+    /// Тишина в комнате сюда не попадает: молчащий микрофон всё равно шлёт
+    /// кадры, просто нулевые. Ноль кадров — это сломанный вход, а не тишина.
+    var onMicrophoneDead: (() -> Void)?
+
     /// Пересоздаётся на каждую запись.
     ///
     /// `AVAudioEngine` кэширует параметры устройства и смену этого устройства
@@ -50,6 +62,8 @@ final class AudioRecorder {
     private(set) var isRecording = false
     private var startedAt: Date?
     private var configObserver: NSObjectProtocol?
+    private var receivedAudio = false
+    private var deadMicWatchdog: Timer?
 
     static func requestMicrophoneAccess() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -118,6 +132,16 @@ final class AudioRecorder {
         isRecording = true
         startedAt = Date()
 
+        receivedAudio = false
+        // Секунды с запасом хватает: кадры идут примерно одиннадцать раз
+        // в секунду, первый приходит почти сразу после старта.
+        deadMicWatchdog = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) {
+            [weak self] _ in
+            guard let self, self.isRecording, !self.receivedAudio else { return }
+            Log.write("Микрофон не отдал ни одного кадра за 1.2 с — обрываю запись")
+            self.onMicrophoneDead?()
+        }
+
         // Подписка после успешного старта: до него движок ещё не тот, за чьей
         // перестройкой мы следим, а порядок вызовов выше трогать нельзя.
         configObserver = NotificationCenter.default.addObserver(
@@ -167,6 +191,9 @@ final class AudioRecorder {
     func stop() -> (url: URL, duration: TimeInterval)? {
         guard isRecording else { return nil }
         isRecording = false
+
+        deadMicWatchdog?.invalidate()
+        deadMicWatchdog = nil
 
         if let configObserver {
             NotificationCenter.default.removeObserver(configObserver)
@@ -255,10 +282,14 @@ final class AudioRecorder {
         guard error == nil, outBuffer.frameLength > 0 else { return }
         try? file.write(from: outBuffer)
 
-        if let level = Self.rms(of: outBuffer) {
-            DispatchQueue.main.async { [weak self] in
-                self?.onLevel?(level)
-            }
+        let level = Self.rms(of: outBuffer)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // Первый дошедший кадр снимает сторожа мёртвого микрофона.
+            // Флаг ставится здесь, а не в звуковом потоке: иначе главный
+            // поток читал бы его наперегонки с записью.
+            self.receivedAudio = true
+            if let level { self.onLevel?(level) }
         }
     }
 

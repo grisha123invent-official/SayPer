@@ -77,6 +77,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.finishRecording(devicesChanged: true)
         }
 
+        // Микрофон открылся мёртвым: обрываем сразу, а не даём человеку
+        // договорить мысль в пустоту и узнать об этом только в конце.
+        recorder.onMicrophoneDead = { [weak self] in
+            guard let self else { return }
+            self.recorder.cancel()
+            self.gate.recordingDidStop()
+            OutputDucker.restore()
+            self.indicator.show(.error("Микрофон не отвечает — начни заново"))
+            self.status = .idle
+        }
+
         recorder.onLevel = { [weak self] level in
             guard let self else { return }
             self.indicator.update(level: level)
@@ -539,6 +550,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue.enqueue(audio: url, duration: duration,
                           insertMode: .clipboardOnly, isRecovered: true)
         }
+    }
+
+    func menuRetryPending(_ id: Int) {
+        queue.retry(id)
     }
 
     func menuForgetPending(_ id: Int) {

@@ -50,6 +50,12 @@ final class TranscriptionQueue {
         /// Файл записи: по «убрать» его надо стереть, иначе фраза вернётся
         /// при следующем запуске как недоставленная.
         let audio: URL
+        /// Нужен для повтора: способ вставки фиксируется в момент записи.
+        let insertMode: InsertMode
+        /// Есть ли смысл предлагать «Повторить». Не всякий провал лечится
+        /// повтором: если в записи нет звука, вторая отправка вернёт ту же
+        /// ошибку и потратит деньги впустую.
+        var canRetry = false
         var stage: Stage
     }
 
@@ -95,7 +101,7 @@ final class TranscriptionQueue {
 
         progress[job.id] = Progress(id: job.id, startedAt: job.startedAt,
                                     duration: duration, isRecovered: isRecovered,
-                                    audio: audio, stage: .sending)
+                                    audio: audio, insertMode: insertMode, stage: .sending)
         publishProgress()
 
         if tasks.isEmpty {
@@ -189,6 +195,10 @@ final class TranscriptionQueue {
     private func note(_ id: Int, _ stage: Progress.Stage) {
         guard var entry = progress[id], entry.stage != stage else { return }
         entry.stage = stage
+        if case .failed = stage {
+            // Пустая запись повтором не чинится — там нечего расшифровывать.
+            entry.canRetry = RecordingVault.duration(of: entry.audio) > 0.4
+        }
         progress[id] = entry
         publishProgress()
     }
@@ -204,6 +214,21 @@ final class TranscriptionQueue {
         }
         progress[id] = nil
         publishProgress()
+    }
+
+    /// Отправить провалившуюся фразу заново.
+    ///
+    /// Запись всё это время лежала на диске: провал её не стирает. Способ
+    /// вставки берётся тот же, что был при записи, — человек нажал «Повторить»
+    /// ради того же самого текста в том же самом месте.
+    func retry(_ id: Int) {
+        guard let entry = progress[id] else { return }
+        progress[id] = nil
+        publishProgress()
+        Log.write("Повторная отправка фразы длиной "
+                  + String(format: "%.1f", entry.duration) + " с")
+        enqueue(audio: entry.audio, duration: entry.duration,
+                insertMode: entry.insertMode, isRecovered: entry.isRecovered)
     }
 
     private func publishProgress() {

@@ -206,6 +206,8 @@ protocol StatusPanelActions: AnyObject {
     func menuShowDiagnostics()
     func menuRequestKeyboardAccess()
     func menuSetActivation(_ mode: HotkeyActivation)
+    /// Отправить заново фразу, которая не доехала.
+    func menuRetryPending(_ id: Int)
     /// Убрать из списка фразу, которая так и не доехала, вместе с записью.
     func menuForgetPending(_ id: Int)
     func menuQuit()
@@ -419,6 +421,8 @@ private struct StatusPanelView: View {
                 // Работающие сверху: они меняются, за ними и следят.
                 ForEach(model.pending) { item in
                     PendingRow(item: item) {
+                        model.actions?.menuRetryPending(item.id)
+                    } forget: {
                         model.actions?.menuForgetPending(item.id)
                     }
                 }
@@ -455,6 +459,7 @@ private struct StatusPanelView: View {
     /// что с ней происходит.
     private struct PendingRow: View {
         let item: TranscriptionQueue.Progress
+        let retry: () -> Void
         let forget: () -> Void
 
         @State private var hovered = false
@@ -470,6 +475,15 @@ private struct StatusPanelView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
+
+                if case .failed = item.stage, item.canRetry {
+                    Button(action: retry) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Отправить заново")
+                }
 
                 if case .failed = item.stage {
                     Button(action: forget) {
