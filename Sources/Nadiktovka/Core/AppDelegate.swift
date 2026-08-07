@@ -71,10 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         renderStatusItem()
 
-        // Устройства переключились посреди записи: дописываем и отправляем то,
-        // что успели, вместо того чтобы молча писать в мёртвый отвод.
+        // Перестройка звука посреди записи. Сама запись при этом продолжается —
+        // сюда попадаем только если поднять вход заново так и не вышло.
         recorder.onDevicesChanged = { [weak self] in
-            self?.finishRecording(devicesChanged: true)
+            self?.indicator.show(.error("Звук переключился, часть фразы могла пропасть"))
         }
 
         // Микрофон открылся мёртвым: обрываем сразу, а не даём человеку
@@ -423,7 +423,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Запись
 
-    private func beginRecording() {
+    /// `attempt` — номер попытки поднять вход.
+    ///
+    /// Переключение устройства в CoreAudio не мгновенное. Пока оно идёт,
+    /// вход отдаёт нулевую частоту, и первая попытка честно проваливается
+    /// с «микрофон не отдаёт данные». Раньше на этом всё и заканчивалось:
+    /// человек видел ошибку, ждал наугад несколько секунд и начинал заново.
+    /// Теперь ждём за него — пять попыток по 0.2 с покрывают переход
+    /// с запасом, а он видит только чуть более поздний старт.
+    private func beginRecording(attempt: Int = 1) {
         // Шлюз считает запись начатой, как только отдал команду. Если мы
         // выходим отсюда, не начав её, он обязан узнать об этом — иначе
         // в режиме «нажал-нажал» следующее нажатие будет принято за
@@ -451,8 +459,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             indicator.setHint(gate.currentHint)
             indicator.show(.recording)
             Sounds.play(.start)
-            Log.write("Запись пошла")
+            Log.write("Запись пошла" + (attempt > 1 ? " (попытка \(attempt))" : ""))
         } catch {
+            // Вход ещё переключается — подождём и попробуем снова. Клавишу
+            // человек всё это время держит; отпустил — бросаем.
+            if case AudioRecorder.RecorderError.engineFailed = error,
+               attempt < 5, gate.isRecording {
+                Log.write("Вход ещё не поднялся (попытка \(attempt)) — жду 0.2 с")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.beginRecording(attempt: attempt + 1)
+                }
+                return
+            }
+
             gate.recordingDidStop()
             fail(error.localizedDescription)
         }
@@ -467,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status = .idle
     }
 
-    private func finishRecording(devicesChanged: Bool = false) {
+    private func finishRecording() {
         // Звук возвращаем сразу после остановки записи: пока идёт расшифровка,
         // микрофон уже не слушает и глушить нечего.
         OutputDucker.restore()
@@ -480,6 +499,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.write("Запись отброшена: всего \(String(format: "%.2f", result.duration)) с")
             try? FileManager.default.removeItem(at: result.url)
             indicator.hide()
+            status = .idle
+            return
+        }
+
+        // Тишину не отправляем. Whisper на пустой записи не молчит, а выдаёт
+        // обрывки титров вроде «Редактор субтитров А.Синецкая» — он видел их
+        // в обучении и затыкает ими пустоту. Такой текст прилетал в поле
+        // вместо надиктованного, а деньги за запрос списывались.
+        //
+        // Порог низкий: 0.10 по шкале индикатора — это примерно −45 dBFS,
+        // тише обычного шума комнаты. Речь, даже вполголоса, выше вдвое.
+        guard recorder.peakLevel >= 0.10 else {
+            Log.write("Запись отброшена: тишина, громче " 
+                      + String(format: "%.2f", recorder.peakLevel) + " не поднялось")
+            RecordingVault.discard(result.url)
+            indicator.show(.error("Не услышал — проверь микрофон"))
             status = .idle
             return
         }
@@ -497,15 +532,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // может уже принять следующую фразу с обычным способом.
         let insertMode = gate.consumeInsertModeOverride() ?? Settings.shared.insertMode
         queue.enqueue(audio: result.url, duration: result.duration, insertMode: insertMode)
-
-        // Предупреждение показываем последним — постановка в очередь тут же
-        // выводит на пилюлю «расшифровываю», и сказанное раньше стёрлось бы,
-        // не успев прочитаться. Молчать здесь нельзя: человек решит, что это
-        // расшифровка плохая, а не запись оборвалась.
-        if devicesChanged {
-            indicator.show(.error("Устройство переключилось, записал "
-                                  + "\(Int(result.duration)) с"))
-        }
     }
 
     /// Готовый текст пришёл и дождался своей очереди.

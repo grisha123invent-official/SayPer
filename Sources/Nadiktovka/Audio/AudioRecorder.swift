@@ -21,7 +21,7 @@ final class AudioRecorder {
     /// Текущий уровень звука 0…1 — для индикатора. Вызывается на главном потоке.
     var onLevel: ((Float) -> Void)?
 
-    /// Устройства переключились посреди записи.
+    /// Устройства переключились посреди записи, но запись продолжается.
     ///
     /// Подключение или пропажа любого устройства — наушников, монитора
     /// с колонками, гарнитуры — заставляет `AVAudioEngine` перестроиться:
@@ -33,7 +33,9 @@ final class AudioRecorder {
     /// 9.6, и Whisper честно расшифровал только их. Две трети сказанного
     /// пропадали молча.
     ///
-    /// Поэтому о перестройке сообщаем наружу, а не пытаемся пережить её тихо.
+    /// Запись при этом **не обрывается**: мы возвращаем прежний микрофон,
+    /// поднимаем новый движок и пишем дальше в тот же файл. Наружу сообщаем
+    /// только чтобы показать человеку, что в фразе возможен короткий провал.
     var onDevicesChanged: (() -> Void)?
 
     /// Микрофон открылся, но не отдал ни одного кадра.
@@ -63,7 +65,15 @@ final class AudioRecorder {
     private var startedAt: Date?
     private var configObserver: NSObjectProtocol?
     private var receivedAudio = false
+    /// Самый громкий кадр за запись, 0…1. По нему видно, был ли вообще звук.
+    private(set) var peakLevel: Float = 0
     private var deadMicWatchdog: Timer?
+    /// Устройство, с которого начали писать.
+    ///
+    /// Пока идёт запись, микрофон меняться не имеет права: подключились
+    /// наушники — их дело, фраза продолжает писаться с того же входа.
+    /// Если macOS подсунет другое устройство по умолчанию, вернём прежнее.
+    private var lockedDevice: AudioDeviceID?
 
     static func requestMicrophoneAccess() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -131,8 +141,10 @@ final class AudioRecorder {
 
         isRecording = true
         startedAt = Date()
+        lockedDevice = AudioDevices.defaultInput()
 
         receivedAudio = false
+        peakLevel = 0
         // Секунды с запасом хватает: кадры идут примерно одиннадцать раз
         // в секунду, первый приходит почти сразу после старта.
         deadMicWatchdog = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) {
@@ -144,12 +156,22 @@ final class AudioRecorder {
 
         // Подписка после успешного старта: до него движок ещё не тот, за чьей
         // перестройкой мы следим, а порядок вызовов выше трогать нельзя.
+        watchReconfiguration()
+    }
+
+    /// Следить за перестройкой звука у текущего движка.
+    ///
+    /// Заводится заново на каждый движок: после перестройки движок другой,
+    /// а уведомление привязано к объекту.
+    private func watchReconfiguration() {
+        if let configObserver {
+            NotificationCenter.default.removeObserver(configObserver)
+        }
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
             guard let self, self.isRecording else { return }
-            Log.write("Устройства переключились посреди записи — закрываю то, что успел")
-            self.onDevicesChanged?()
+            self.resumeAfterReconfiguration()
         }
     }
 
@@ -183,6 +205,66 @@ final class AudioRecorder {
         } else {
             Log.write("Микрофон: не удалось переключить на «\(device.name)», "
                       + "остаётся системный")
+        }
+    }
+
+    /// Система перестроила звук посреди записи — поднимаемся заново и пишем
+    /// дальше в тот же файл.
+    ///
+    /// Так, а не «закрыть фразу»: человек в этот момент говорит и про наушники
+    /// не думает. Обрывать его на полуслове из-за того, что кто-то рядом достал
+    /// гарнитуру из чехла, — хуже, чем короткий провал в записи.
+    ///
+    /// Движок пересоздаётся целиком: старый после смены устройства не
+    /// оживает — `start()` отвечает -10868. Файл при этом остаётся прежним,
+    /// поэтому фраза в нём продолжается, а не начинается заново.
+    /// Преобразователь сбрасывается: у нового входа может быть своя частота.
+    private func resumeAfterReconfiguration(attempt: Int = 1) {
+        guard isRecording else { return }
+
+        // Микрофон меняться не имеет права, пока человек говорит.
+        if let lockedDevice, AudioDevices.defaultInput() != lockedDevice {
+            AudioDevices.makeDefaultInput(lockedDevice)
+            Log.write("Микрофон подменился посреди записи — вернул прежний")
+        }
+
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        if let configObserver {
+            NotificationCenter.default.removeObserver(configObserver)
+            self.configObserver = nil
+        }
+
+        engine = AVAudioEngine()
+        converter = nil
+
+        let input = engine.inputNode
+        let ready = input.inputFormat(forBus: 0).sampleRate > 0
+        if ready {
+            input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
+                self?.append(buffer)
+            }
+            engine.prepare()
+        }
+
+        do {
+            guard ready else { throw RecorderError.engineFailed("вход ещё не поднялся") }
+            try engine.start()
+            Log.write("Звук перестроился, запись продолжается в тот же файл"
+                      + (attempt > 1 ? " (попытка \(attempt))" : ""))
+            watchReconfiguration()
+        } catch {
+            // Устройство ещё переключается. Ждём и пробуем снова: три попытки
+            // за секунду покрывают и наушники, и мониторы с колонками.
+            guard attempt < 4 else {
+                Log.write("Продолжить запись не удалось: \(error.localizedDescription). "
+                          + "В файле остаётся то, что успели записать")
+                onDevicesChanged?()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.resumeAfterReconfiguration(attempt: attempt + 1)
+            }
         }
     }
 
@@ -289,7 +371,10 @@ final class AudioRecorder {
             // Флаг ставится здесь, а не в звуковом потоке: иначе главный
             // поток читал бы его наперегонки с записью.
             self.receivedAudio = true
-            if let level { self.onLevel?(level) }
+            if let level {
+                self.peakLevel = max(self.peakLevel, level)
+                self.onLevel?(level)
+            }
         }
     }
 
