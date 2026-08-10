@@ -620,6 +620,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             language: Settings.shared.language,
             cleanupUsed: Settings.shared.cleanup
         ))
+
+        // Панель показывает «Последние» тем списком, который прочитала при
+        // открытии. Если она открыта прямо сейчас, свежая расшифровка в неё
+        // не попадала — человек смотрел на список и не находил в нём того,
+        // что только что надиктовал.
+        statusPanel.refreshIfOpen()
     }
 
     /// Esc: прерывает и запись, и ожидание ответа от OpenAI.

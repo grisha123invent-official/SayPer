@@ -74,6 +74,7 @@ final class AudioRecorder {
     /// наушники — их дело, фраза продолжает писаться с того же входа.
     /// Если macOS подсунет другое устройство по умолчанию, вернём прежнее.
     private var lockedDevice: AudioDeviceID?
+    private var defaultInputListener: AudioObjectPropertyListenerBlock?
 
     static func requestMicrophoneAccess() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -141,7 +142,7 @@ final class AudioRecorder {
 
         isRecording = true
         startedAt = Date()
-        lockedDevice = AudioDevices.defaultInput()
+        guardDefaultInput()
 
         receivedAudio = false
         peakLevel = 0
@@ -157,6 +158,51 @@ final class AudioRecorder {
         // Подписка после успешного старта: до него движок ещё не тот, за чьей
         // перестройкой мы следим, а порядок вызовов выше трогать нельзя.
         watchReconfiguration()
+    }
+
+    /// Не давать системе забрать микрофон, пока человек говорит.
+    ///
+    /// Замерено на живой записи: выбран встроенный, рядом AirPods Max.
+    /// Через две секунды после старта macOS сама сделала входом наушники —
+    /// уведомления о перестройке движка при этом не было вовсе. Наушники
+    /// ушли из музыкального режима в гарнитурный (музыка сначала
+    /// захлебнулась, потом пропала), движок остался без своего входа
+    /// и замолчал: 19 секунд речи, 1.9 секунды в файле.
+    ///
+    /// Поэтому следим не за движком, а за самим системным выбором входа:
+    /// подменили — возвращаем немедленно. Обратной подмены не случается:
+    /// после возврата новое значение совпадает с запертым, и сторож молчит.
+    private func guardDefaultInput() {
+        guard let locked = lockedDevice else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self, self.isRecording else { return }
+            guard AudioDevices.defaultInput() != locked else { return }
+            Log.write("Система забрала микрофон посреди записи — возвращаю выбранный")
+            AudioDevices.makeDefaultInput(locked)
+        }
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block
+        )
+        defaultInputListener = block
+    }
+
+    private func releaseDefaultInputGuard() {
+        guard let block = defaultInputListener else { return }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block
+        )
+        defaultInputListener = nil
     }
 
     /// Следить за перестройкой звука у текущего движка.
@@ -194,12 +240,14 @@ final class AudioRecorder {
         // Если это и так системный микрофон по умолчанию, ничего не трогаем.
         // Любое назначение устройства — риск, а тут оно бессмысленно.
         if AudioDevices.defaultInput() == device.id {
+            lockedDevice = device.id
             Log.write("Микрофон: \(AudioDevices.explain())")
             return
         }
 
         // Переключаем системный микрофон, а не подменяем устройство внутри
         // движка — см. `AudioDevices.makeDefaultInput`.
+        lockedDevice = device.id
         if AudioDevices.makeDefaultInput(device.id) {
             Log.write("Микрофон: \(AudioDevices.explain())")
         } else {
@@ -276,6 +324,7 @@ final class AudioRecorder {
 
         deadMicWatchdog?.invalidate()
         deadMicWatchdog = nil
+        releaseDefaultInputGuard()
 
         if let configObserver {
             NotificationCenter.default.removeObserver(configObserver)

@@ -553,14 +553,16 @@ private struct StatusPanelView: View {
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
 
-                if hovered {
-                    Button(action: copy) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Скопировать")
+                // Копирование видно всегда, а не по наведению. Это спасательный
+                // выход: если вставка не долетела до нужного окна, текст
+                // достают отсюда, и искать способ в этот момент незачем.
+                Button(action: copy) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 11))
+                        .foregroundStyle(hovered ? .primary : .tertiary)
                 }
+                .buttonStyle(.plain)
+                .help("Скопировать")
 
                 Text(Self.time.string(from: record.date))
                     .font(.system(size: 10).monospacedDigit())
