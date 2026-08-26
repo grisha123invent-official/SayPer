@@ -10,6 +10,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// SettingsModel читает ключ из связки ключей, а на этот запрос система
     /// хочет показать диалог — которого до старта NSApplication показать негде.
     private lazy var settingsWindow = SettingsWindowController()
+
+    /// Вход поднимается в фоне, и это занимает время. Флаг живёт только
+    /// на главном потоке и не даёт начать вторую запись, пока идёт первая.
+    private var isStartingRecording = false
+
+    /// Номер попытки запуска. Нужен, чтобы отличить «запуск, которого мы
+    /// ещё ждём» от «запуска, который мы бросили»: заклинивший CoreAudio
+    /// может ответить через минуту, через час или никогда, и его поздний
+    /// ответ не должен внезапно включать запись.
+    private var startGeneration = 0
     /// Превращает события хоткея в команды записи — здесь живут режимы активации.
     private let gate = RecordingGate()
     private let statusMenu = StatusMenuBuilder()
@@ -81,11 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // договорить мысль в пустоту и узнать об этом только в конце.
         recorder.onMicrophoneDead = { [weak self] in
             guard let self else { return }
-            self.recorder.cancel()
-            self.gate.recordingDidStop()
-            OutputDucker.restore()
-            self.indicator.show(.error("Микрофон не отвечает — начни заново"))
-            self.status = .idle
+            // Запись не обрываем: пусть пишет сколько сможет, а разберёмся
+            // по факту. Обрывать посреди фразы — значит терять сказанное.
+            Log.write("Микрофон не отдал ни одного кадра — оставляю запись идти")
         }
 
         recorder.onLevel = { [weak self] level in
@@ -438,7 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // завершение несуществующей записи, и фраза потеряется.
         // Ждать конца прошлой расшифровки больше не нужно: она доедет сама,
         // в фоне. Занят бывает только микрофон — он один.
-        guard !recorder.isRecording else {
+        guard !recorder.isRecording, !isStartingRecording else {
             gate.recordingDidStop()
             return
         }
@@ -450,31 +458,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        do {
-            try recorder.start(deviceTag: deviceForNextRecording)
-            // Музыка и видео лезут в микрофон, поэтому глушим их на время
-            // записи. Возврат — в каждой точке выхода из неё.
-            OutputDucker.duck()
-            status = .recording
-            indicator.setHint(gate.currentHint)
-            indicator.show(.recording)
-            Sounds.play(.start)
-            Log.write("Запись пошла" + (attempt > 1 ? " (попытка \(attempt))" : ""))
-        } catch {
-            // Вход ещё переключается — подождём и попробуем снова. Клавишу
-            // человек всё это время держит; отпустил — бросаем.
-            if case AudioRecorder.RecorderError.engineFailed = error,
-               attempt < 5, gate.isRecording {
-                Log.write("Вход ещё не поднялся (попытка \(attempt)) — жду 0.2 с")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    self?.beginRecording(attempt: attempt + 1)
-                }
-                return
-            }
+        // Запуск уходит в фоновую очередь, и это главное здесь.
+        //
+        // `AVAudioEngine.inputNode` синхронно спрашивает CoreAudio о формате
+        // устройства. Когда звуковой сервер заклинивает — а он заклинивает,
+        // это снято слепком дважды: `coreaudiod` крутится на 65-70% и молчит, —
+        // вызов не возвращается вовсе. На главном потоке это означало смерть
+        // всего приложения: ни панели, ни горячей клавиши, только перезапуск.
+        //
+        // Сторожем такое не лечится: главный поток стоит, и таймеру негде
+        // сработать. Лечится только тем, чтобы не занимать им главный поток.
+        isStartingRecording = true
+        startGeneration += 1
+        let generation = startGeneration
+        let tag = deviceForNextRecording
 
-            gate.recordingDidStop()
-            fail(error.localizedDescription)
+        // Срок ожидания. Без него заклинивший звук отнимал диктовку насовсем:
+        // запуск не возвращался вовсе (снято слепком — фоновый поток стоял
+        // в CoreAudio четверо суток), флаг оставался поднятым, и каждое
+        // следующее нажатие молча упиралось в него. Приложение при этом
+        // выглядело живым, а работать отказывалось до перезапуска.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, self.isStartingRecording, generation == self.startGeneration
+            else { return }
+            self.isStartingRecording = false
+            self.gate.recordingDidStop()
+            // Молча: сообщения об ошибках посреди работы только мешают,
+            // человек и так видит, что пилюля не появилась.
+            Log.write("Запуск записи не ответил за 3 с — бросаю попытку")
         }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                try self.recorder.start(deviceTag: tag)
+                DispatchQueue.main.async {
+                    self.recordingDidStart(attempt: attempt, generation: generation)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard generation == self.startGeneration else { return }
+                    self.recordingFailedToStart(error, attempt: attempt)
+                }
+            }
+        }
+    }
+
+    /// Вход поднялся. Дальше всё как раньше — но уже на главном потоке.
+    private func recordingDidStart(attempt: Int, generation: Int) {
+        // Опоздавший ответ от брошенной попытки: запись включать нельзя,
+        // человек давно отпустил клавишу и занят другим.
+        guard generation == startGeneration else {
+            recorder.cancel()
+            Log.write("Запуск ответил после того, как его бросили — запись отменена")
+            return
+        }
+
+        isStartingRecording = false
+
+        // Клавишу могли отпустить, пока поднимался вход: с зажатым звуковым
+        // сервером это занимает секунды. Записывать уже нечего.
+        guard gate.isRecording else {
+            recorder.cancel()
+            status = .idle
+            Log.write("Клавишу отпустили, пока поднимался микрофон — запись отменена")
+            return
+        }
+
+        // Музыка и видео лезут в микрофон, поэтому глушим их на время
+        // записи. Возврат — в каждой точке выхода из неё.
+        OutputDucker.duck()
+        status = .recording
+        indicator.setHint(gate.currentHint)
+        indicator.show(.recording)
+        Sounds.play(.start)
+        Log.write("Запись пошла" + (attempt > 1 ? " (попытка \(attempt))" : ""))
+    }
+
+    private func recordingFailedToStart(_ error: Error, attempt: Int) {
+        isStartingRecording = false
+
+        // Вход ещё переключается — подождём и попробуем снова. Клавишу
+        // человек всё это время держит; отпустил — бросаем.
+        if case AudioRecorder.RecorderError.engineFailed = error,
+           attempt < 5, gate.isRecording {
+            Log.write("Вход ещё не поднялся (попытка \(attempt)) — жду 0.2 с")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.beginRecording(attempt: attempt + 1)
+            }
+            return
+        }
+
+        gate.recordingDidStop()
+        fail(error.localizedDescription)
     }
 
     private func abortRecording() {
@@ -493,7 +569,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let stopped = recorder.stop()
         gate.recordingDidStop()
-        guard let result = stopped else { return }
+
+        // Записи не досталось файла — значит и записи не было. Но если файл
+        // всё же остался в кладовке от сорвавшейся попытки, он не пропадёт:
+        // приложение подберёт его при следующем запуске.
+        guard let result = stopped else {
+            let leftovers = RecordingVault.orphans()
+            if !leftovers.isEmpty {
+                Log.write("Остановка не дала файла, но в кладовке лежит "
+                          + "\(leftovers.count) — подберу при запуске")
+            }
+            status = .idle
+            indicator.hide()
+            return
+        }
 
         guard result.duration >= minimumDuration else {
             Log.write("Запись отброшена: всего \(String(format: "%.2f", result.duration)) с")
@@ -503,20 +592,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Тишину не отправляем. Whisper на пустой записи не молчит, а выдаёт
-        // обрывки титров вроде «Редактор субтитров А.Синецкая» — он видел их
-        // в обучении и затыкает ими пустоту. Такой текст прилетал в поле
-        // вместо надиктованного, а деньги за запрос списывались.
+        // Записали — отправляем. Всегда, без разбирательств.
         //
-        // Порог низкий: 0.10 по шкале индикатора — это примерно −45 dBFS,
-        // тише обычного шума комнаты. Речь, даже вполголоса, выше вдвое.
-        guard recorder.peakLevel >= 0.10 else {
-            Log.write("Запись отброшена: тишина, громче " 
-                      + String(format: "%.2f", recorder.peakLevel) + " не поднялось")
-            RecordingVault.discard(result.url)
-            indicator.show(.error("Не услышал — проверь микрофон"))
-            status = .idle
-            return
+        // Раньше тихая запись отбрасывалась, чтобы не платить за пустой запрос
+        // и не получать в поле выдуманный Whisper'ом мусор. На деле это значило
+        // «иногда молча выбрасываем сказанное», а такого быть не должно:
+        // человек говорил, значит запись едет в расшифровку. Мусор отсекается
+        // потом, при вставке — см. `TextInserter` и список подделок ниже.
+        if recorder.peakLevel < 0.10 {
+            Log.write("Запись тихая (пик \(String(format: "%.2f", recorder.peakLevel))), "
+                      + "но отправляю — выбрасывать сказанное нельзя")
         }
 
         let size = (try? FileManager.default.attributesOfItem(atPath: result.url.path)[.size] as? Int) ?? 0
@@ -582,8 +667,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         queue.retry(id)
     }
 
-    func menuForgetPending(_ id: Int) {
-        queue.forget(id)
+    func menuCancelPending(_ id: Int) {
+        queue.cancel(id)
     }
 
     private func deliver(_ text: String, from job: TranscriptionQueue.Job) {

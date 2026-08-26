@@ -177,6 +177,14 @@ final class HotkeyMonitor {
 
         guard !isSuspended else { return Unmanaged.passUnretained(event) }
 
+        // Свои же события — вставка текста синтетическим ⌘V — пропускаем
+        // не глядя. Флагов зажатого человеком модификатора в них нет,
+        // и раньше перехватчик принимал их за отпускание клавиши: пилюля
+        // гасла посреди фразы, а запись выбрасывалась как случайное касание.
+        if event.getIntegerValueField(.eventSourceUserData) == SyntheticMark.value {
+            return Unmanaged.passUnretained(event)
+        }
+
         currentMask = UInt(event.flags.rawValue) & ModifierBit.all
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))

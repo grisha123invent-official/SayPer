@@ -1,8 +1,29 @@
+import AudioToolbox
 import AVFoundation
+import CoreAudio
 import Foundation
 
-/// Пишет с микрофона в 16 kHz mono WAV — формат, который Whisper принимает напрямую
-/// и который в 6 раз легче исходных 48 kHz stereo.
+/// Пишет с микрофона в 16 kHz mono WAV — формат, который Whisper принимает
+/// напрямую и который в шесть раз легче исходных 48 kHz stereo.
+///
+/// Записывает не через `AVAudioEngine`, а через собственный юнит AUHAL
+/// с **выключенной выходной стороной**. Так делают серьёзные звуковые
+/// приложения, и переход на этот способ 21 августа закрыл сразу весь ворох
+/// бед, которые до того лечились по одной и возвращались:
+///
+/// - **Системный микрофон больше не переключается.** Раньше выбрать устройство
+///   можно было только сделав его системным входом: у `AVAudioEngine` нет
+///   свойства «пиши с этого устройства». Своему юниту оно задаётся напрямую,
+///   поэтому чужие настройки не трогаются вовсе.
+/// - **Наушники на выводе больше не мешают.** Движок держит вход и выход одним
+///   узлом: при выводе на AirPods и записи со встроенного микрофона `start()`
+///   отвечал -10868, «формат не поддерживается». Здесь выхода нет вообще.
+/// - **Перестройки звука не рвут запись.** Уведомление о них приходило движку,
+///   он терял отвод и молча замолкал посреди фразы.
+///
+/// Проверено замером на живой машине: вывод на AirPods Pro, вход встроенный,
+/// 143 872 кадра за три секунды при ожидаемых 144 000, системный вход
+/// нетронут.
 final class AudioRecorder {
     enum RecorderError: LocalizedError {
         case micDenied
@@ -21,324 +42,128 @@ final class AudioRecorder {
     /// Текущий уровень звука 0…1 — для индикатора. Вызывается на главном потоке.
     var onLevel: ((Float) -> Void)?
 
-    /// Устройства переключились посреди записи, но запись продолжается.
-    ///
-    /// Подключение или пропажа любого устройства — наушников, монитора
-    /// с колонками, гарнитуры — заставляет `AVAudioEngine` перестроиться:
-    /// у входного узла меняется формат, а установленный отвод перестаёт
-    /// отдавать данные. Само приложение об этом не узнаёт и продолжает
-    /// считать, что пишет, — в файл при этом больше ничего не попадает.
-    ///
-    /// Замерено на живой записи: человек говорил 27 секунд, в файле оказалось
-    /// 9.6, и Whisper честно расшифровал только их. Две трети сказанного
-    /// пропадали молча.
-    ///
-    /// Запись при этом **не обрывается**: мы возвращаем прежний микрофон,
-    /// поднимаем новый движок и пишем дальше в тот же файл. Наружу сообщаем
-    /// только чтобы показать человеку, что в фразе возможен короткий провал.
+    /// Устройства переключились посреди записи. Запись при этом продолжается:
+    /// свой юнит держит своё устройство и чужих перестроек не замечает.
     var onDevicesChanged: (() -> Void)?
 
     /// Микрофон открылся, но не отдал ни одного кадра.
-    ///
-    /// Так бывает после того, как рядом дёрнулось устройство: движок
-    /// запускается без ошибки, а вход остаётся мёртвым. Замерено на живой
-    /// записи: человек говорил 17 секунд, в файле оказалось 4096 байт —
-    /// один заголовок. Узнавал он об этом только в конце, когда мысль уже
-    /// была сказана в пустоту.
-    ///
-    /// Тишина в комнате сюда не попадает: молчащий микрофон всё равно шлёт
-    /// кадры, просто нулевые. Ноль кадров — это сломанный вход, а не тишина.
     var onMicrophoneDead: (() -> Void)?
 
-    /// Пересоздаётся на каждую запись.
-    ///
-    /// `AVAudioEngine` кэширует параметры устройства и смену этого устройства
-    /// не переживает: после переключения вход перестаёт совпадать с выходом,
-    /// и `start()` отвечает -10868, «формат не поддерживается». Ни `reset()`,
-    /// ни повторное чтение формата не помогают — надёжно только новый движок.
-    /// Стоит это доли миллисекунды, а запись идёт раз в минуту.
-    private var engine = AVAudioEngine()
-    private var file: AVAudioFile?
-    private var converter: AVAudioConverter?
-    private var outputURL: URL?
     private(set) var isRecording = false
-    private var startedAt: Date?
-    private var configObserver: NSObjectProtocol?
-    private var receivedAudio = false
+
     /// Самый громкий кадр за запись, 0…1. По нему видно, был ли вообще звук.
     private(set) var peakLevel: Float = 0
+
+    private var unit: AudioUnit?
+    private var file: AVAudioFile?
+    private var converter: AVAudioConverter?
+    private var hardwareFormat: AVAudioFormat?
+    private var outputURL: URL?
+    private var startedAt: Date?
+    private var receivedAudio = false
     private var deadMicWatchdog: Timer?
-    /// Устройство, с которого начали писать.
-    ///
-    /// Пока идёт запись, микрофон меняться не имеет права: подключились
-    /// наушники — их дело, фраза продолжает писаться с того же входа.
-    /// Если macOS подсунет другое устройство по умолчанию, вернём прежнее.
-    private var lockedDevice: AudioDeviceID?
-    private var defaultInputListener: AudioObjectPropertyListenerBlock?
 
     static func requestMicrophoneAccess() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return true
-        case .notDetermined:
-            return await AVCaptureDevice.requestAccess(for: .audio)
-        default:
-            return false
+        case .authorized: return true
+        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
+        default: return false
         }
     }
+
+    // MARK: - Запись
 
     func start(deviceTag: String? = nil) throws {
         guard !isRecording else { return }
 
-        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
-            throw RecorderError.micDenied
-        }
+        let device = resolveDevice(deviceTag)
+        let unit = try makeUnit(device: device)
+        self.unit = unit
 
-        // Новый движок на каждую запись — см. объявление `engine`.
-        engine = AVAudioEngine()
-
-        // Устройство назначаем до первого обращения к формату: движок
-        // запрашивает параметры у того устройства, которое стоит в этот момент,
-        // и переключать его потом уже поздно.
-        selectInputDevice(deviceTag)
-
-        let input = engine.inputNode
-        let inputFormat = input.inputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw RecorderError.engineFailed("микрофон не отдаёт данные")
-        }
+        let hardware = try clientFormat(of: unit)
+        hardwareFormat = hardware
 
         let (url, audioFile) = try makeFile()
-
         file = audioFile
-        converter = nil
         outputURL = url
+        converter = AVAudioConverter(from: hardware, to: audioFile.processingFormat)
 
-        // Формат отводу не задаём — берём `nil`, то есть «спроси у узла сам».
-        //
-        // Раньше сюда передавался формат, прочитанный секундой раньше, и на
-        // беспроводной гарнитуре это роняло приложение: открытие микрофона
-        // переводит наушники в гарнитурный режим, там другая частота, формат
-        // перестаёт совпадать, и `installTap` бросает исключение Objective-C.
-        // Из Swift такое не поймать — процесс просто падал.
-        //
-        // Раз формат теперь известен только в момент прихода данных,
-        // преобразователь создаётся по первому же буферу.
-        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
-            self?.append(buffer)
-        }
+        var callback = AURenderCallbackStruct(
+            inputProc: { refCon, flags, stamp, bus, frames, _ in
+                let recorder = Unmanaged<AudioRecorder>.fromOpaque(refCon).takeUnretainedValue()
+                recorder.render(flags: flags, stamp: stamp, bus: bus, frames: frames)
+                return noErr
+            },
+            inputProcRefCon: Unmanaged.passUnretained(self).toOpaque()
+        )
+        AudioUnitSetProperty(unit, kAudioOutputUnitProperty_SetInputCallback,
+                             kAudioUnitScope_Global, 0, &callback,
+                             UInt32(MemoryLayout<AURenderCallbackStruct>.size))
 
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            input.removeTap(onBus: 0)
-            file = nil
-            converter = nil
-            outputURL = nil
+        let initStatus = AudioUnitInitialize(unit)
+        guard initStatus == noErr else {
+            teardown()
             try? FileManager.default.removeItem(at: url)
-            throw RecorderError.engineFailed(error.localizedDescription)
+            throw RecorderError.engineFailed("вход не поднялся (\(initStatus))")
+        }
+        let startStatus = AudioOutputUnitStart(unit)
+        guard startStatus == noErr else {
+            teardown()
+            try? FileManager.default.removeItem(at: url)
+            throw RecorderError.engineFailed("запуск не удался (\(startStatus))")
         }
 
         isRecording = true
         startedAt = Date()
-        guardDefaultInput()
-
         receivedAudio = false
         peakLevel = 0
-        // Секунды с запасом хватает: кадры идут примерно одиннадцать раз
-        // в секунду, первый приходит почти сразу после старта.
-        deadMicWatchdog = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) {
-            [weak self] _ in
-            guard let self, self.isRecording, !self.receivedAudio else { return }
-            Log.write("Микрофон не отдал ни одного кадра за 1.2 с — обрываю запись")
-            self.onMicrophoneDead?()
-        }
 
-        // Подписка после успешного старта: до него движок ещё не тот, за чьей
-        // перестройкой мы следим, а порядок вызовов выше трогать нельзя.
-        watchReconfiguration()
-    }
-
-    /// Не давать системе забрать микрофон, пока человек говорит.
-    ///
-    /// Замерено на живой записи: выбран встроенный, рядом AirPods Max.
-    /// Через две секунды после старта macOS сама сделала входом наушники —
-    /// уведомления о перестройке движка при этом не было вовсе. Наушники
-    /// ушли из музыкального режима в гарнитурный (музыка сначала
-    /// захлебнулась, потом пропала), движок остался без своего входа
-    /// и замолчал: 19 секунд речи, 1.9 секунды в файле.
-    ///
-    /// Поэтому следим не за движком, а за самим системным выбором входа:
-    /// подменили — возвращаем немедленно. Обратной подмены не случается:
-    /// после возврата новое значение совпадает с запертым, и сторож молчит.
-    private func guardDefaultInput() {
-        guard let locked = lockedDevice else { return }
-
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+        // Заводится на главном цикле: запуск идёт из фоновой очереди,
+        // а там нет цикла событий — таймер молча не сработал бы.
+        DispatchQueue.main.async { [weak self] in
             guard let self, self.isRecording else { return }
-            guard AudioDevices.defaultInput() != locked else { return }
-            Log.write("Система забрала микрофон посреди записи — возвращаю выбранный")
-            AudioDevices.makeDefaultInput(locked)
-        }
-        AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block
-        )
-        defaultInputListener = block
-    }
-
-    private func releaseDefaultInputGuard() {
-        guard let block = defaultInputListener else { return }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block
-        )
-        defaultInputListener = nil
-    }
-
-    /// Следить за перестройкой звука у текущего движка.
-    ///
-    /// Заводится заново на каждый движок: после перестройки движок другой,
-    /// а уведомление привязано к объекту.
-    private func watchReconfiguration() {
-        if let configObserver {
-            NotificationCenter.default.removeObserver(configObserver)
-        }
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
-        ) { [weak self] _ in
-            guard let self, self.isRecording else { return }
-            self.resumeAfterReconfiguration()
-        }
-    }
-
-    /// Назначает движку конкретное устройство ввода.
-    ///
-    /// Без этого AVAudioEngine берёт системное «по умолчанию», а это сплошь
-    /// и рядом беспроводные наушники — и запись отбирает их у телефона.
-    /// Единственный способ задать устройство на macOS — достучаться до AUHAL
-    /// под движком: у самого AVAudioEngine такого свойства нет.
-    private func selectInputDevice(_ deviceTag: String?) {
-        // Тег приходит из режима «клавиша на устройство»: там микрофон
-        // назначает само сочетание, а не общий выбор в панели.
-        let chosen = deviceTag.map { AudioDevices.resolve(MicrophoneChoice(tag: $0)) }
-            ?? AudioDevices.selected()
-        guard let device = chosen else {
-            Log.write("Микрофон: \(AudioDevices.explain())")
-            return
-        }
-
-        // Если это и так системный микрофон по умолчанию, ничего не трогаем.
-        // Любое назначение устройства — риск, а тут оно бессмысленно.
-        if AudioDevices.defaultInput() == device.id {
-            lockedDevice = device.id
-            Log.write("Микрофон: \(AudioDevices.explain())")
-            return
-        }
-
-        // Переключаем системный микрофон, а не подменяем устройство внутри
-        // движка — см. `AudioDevices.makeDefaultInput`.
-        lockedDevice = device.id
-        if AudioDevices.makeDefaultInput(device.id) {
-            Log.write("Микрофон: \(AudioDevices.explain())")
-        } else {
-            Log.write("Микрофон: не удалось переключить на «\(device.name)», "
-                      + "остаётся системный")
-        }
-    }
-
-    /// Система перестроила звук посреди записи — поднимаемся заново и пишем
-    /// дальше в тот же файл.
-    ///
-    /// Так, а не «закрыть фразу»: человек в этот момент говорит и про наушники
-    /// не думает. Обрывать его на полуслове из-за того, что кто-то рядом достал
-    /// гарнитуру из чехла, — хуже, чем короткий провал в записи.
-    ///
-    /// Движок пересоздаётся целиком: старый после смены устройства не
-    /// оживает — `start()` отвечает -10868. Файл при этом остаётся прежним,
-    /// поэтому фраза в нём продолжается, а не начинается заново.
-    /// Преобразователь сбрасывается: у нового входа может быть своя частота.
-    private func resumeAfterReconfiguration(attempt: Int = 1) {
-        guard isRecording else { return }
-
-        // Микрофон меняться не имеет права, пока человек говорит.
-        if let lockedDevice, AudioDevices.defaultInput() != lockedDevice {
-            AudioDevices.makeDefaultInput(lockedDevice)
-            Log.write("Микрофон подменился посреди записи — вернул прежний")
-        }
-
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        if let configObserver {
-            NotificationCenter.default.removeObserver(configObserver)
-            self.configObserver = nil
-        }
-
-        engine = AVAudioEngine()
-        converter = nil
-
-        let input = engine.inputNode
-        let ready = input.inputFormat(forBus: 0).sampleRate > 0
-        if ready {
-            input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
-                self?.append(buffer)
-            }
-            engine.prepare()
-        }
-
-        do {
-            guard ready else { throw RecorderError.engineFailed("вход ещё не поднялся") }
-            try engine.start()
-            Log.write("Звук перестроился, запись продолжается в тот же файл"
-                      + (attempt > 1 ? " (попытка \(attempt))" : ""))
-            watchReconfiguration()
-        } catch {
-            // Устройство ещё переключается. Ждём и пробуем снова: три попытки
-            // за секунду покрывают и наушники, и мониторы с колонками.
-            guard attempt < 4 else {
-                Log.write("Продолжить запись не удалось: \(error.localizedDescription). "
-                          + "В файле остаётся то, что успели записать")
-                onDevicesChanged?()
-                return
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.resumeAfterReconfiguration(attempt: attempt + 1)
+            self.deadMicWatchdog = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) {
+                [weak self] _ in
+                guard let self, self.isRecording, !self.receivedAudio else { return }
+                Log.write("Микрофон не отдал ни одного кадра за 1.2 с")
+                self.onMicrophoneDead?()
             }
         }
     }
 
     /// Останавливает запись и возвращает файл и его длительность.
+    /// Останавливает запись и возвращает файл и его длительность.
+    ///
+    /// Отдаёт файл **даже если запись уже считается остановленной**. Пустой
+    /// ответ раньше означал молчаливую потерю: звук на диск лёг, а наверх
+    /// об этом не сообщили, и никто его не подобрал. Замерено 23 августа —
+    /// восемнадцать секунд речи исчезли ровно так.
     @discardableResult
     func stop() -> (url: URL, duration: TimeInterval)? {
-        guard isRecording else { return nil }
+        guard isRecording else {
+            // Запись уже сняли, но файл от неё остался — отдаём его.
+            guard let url = outputURL else { return nil }
+            let duration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
+            Log.write("Запись уже была остановлена, но файл на месте — отдаю его")
+            file = nil
+            converter = nil
+            hardwareFormat = nil
+            outputURL = nil
+            startedAt = nil
+            return (url, duration)
+        }
         isRecording = false
 
         deadMicWatchdog?.invalidate()
         deadMicWatchdog = nil
-        releaseDefaultInputGuard()
-
-        if let configObserver {
-            NotificationCenter.default.removeObserver(configObserver)
-            self.configObserver = nil
-        }
-
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
 
         let duration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
         let url = outputURL
 
+        teardown()
         file = nil          // закрывает файл и дописывает WAV-заголовок
         converter = nil
+        hardwareFormat = nil
         outputURL = nil
         startedAt = nil
 
@@ -346,22 +171,110 @@ final class AudioRecorder {
         return (url, duration)
     }
 
-    /// Прервать запись и выбросить файл — например, когда удержание оказалось шорткатом.
+    /// Прервать запись и выбросить файл — например, когда удержание
+    /// оказалось шорткатом.
     func cancel() {
         guard let result = stop() else { return }
-        try? FileManager.default.removeItem(at: result.url)
+        RecordingVault.discard(result.url)
+    }
+
+    // MARK: - Устройство и юнит
+
+    private func resolveDevice(_ deviceTag: String?) -> InputDevice? {
+        // Тег приходит из режима «клавиша на устройство»: там микрофон
+        // назначает само сочетание, а не общий выбор в панели.
+        let chosen = deviceTag.map { AudioDevices.resolve(MicrophoneChoice(tag: $0)) }
+            ?? AudioDevices.selected()
+        Log.write("Микрофон: \(chosen?.name ?? "системный") [\(AudioDevices.explain())]")
+        return chosen
+    }
+
+    /// Собирает юнит: вход включён, выход выключен, устройство своё.
+    ///
+    /// Выключенный выход — суть всей затеи. Пока он включён, юнит обязан
+    /// обслуживать и вывод тоже, и при разных устройствах на входе и выходе
+    /// отказывается работать.
+    private func makeUnit(device: InputDevice?) throws -> AudioUnit {
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Output,
+            componentSubType: kAudioUnitSubType_HALOutput,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0, componentFlagsMask: 0
+        )
+        guard let component = AudioComponentFindNext(nil, &description) else {
+            throw RecorderError.engineFailed("в системе нет звукового компонента")
+        }
+
+        var created: AudioUnit?
+        let status = AudioComponentInstanceNew(component, &created)
+        guard status == noErr, let unit = created else {
+            throw RecorderError.engineFailed("юнит не создался (\(status))")
+        }
+
+        var enable: UInt32 = 1
+        var disable: UInt32 = 0
+        AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO,
+                             kAudioUnitScope_Input, 1, &enable, 4)
+        AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO,
+                             kAudioUnitScope_Output, 0, &disable, 4)
+
+        if let device {
+            var id = device.id
+            let assigned = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                                                kAudioUnitScope_Global, 0, &id, 4)
+            if assigned != noErr {
+                Log.write("Микрофон: не удалось назначить «\(device.name)» (\(assigned)), "
+                          + "пишем системным")
+            }
+        }
+        return unit
+    }
+
+    /// Формат, в котором юнит будет отдавать нам кадры: моно float
+    /// на частоте самого железа. Частоту берём у устройства, а не задаём
+    /// свою: навязанная частота — верный способ получить отказ.
+    private func clientFormat(of unit: AudioUnit) throws -> AVAudioFormat {
+        var hardware = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat,
+                                          kAudioUnitScope_Input, 1, &hardware, &size)
+        guard status == noErr, hardware.mSampleRate > 0 else {
+            throw RecorderError.engineFailed("микрофон не отдаёт данные")
+        }
+
+        var client = AudioStreamBasicDescription(
+            mSampleRate: hardware.mSampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4,
+            mChannelsPerFrame: 1, mBitsPerChannel: 32, mReserved: 0
+        )
+        let applied = AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat,
+                                           kAudioUnitScope_Output, 1, &client,
+                                           UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
+        guard applied == noErr, let format = AVAudioFormat(streamDescription: &client) else {
+            throw RecorderError.engineFailed("формат отвода не принят (\(applied))")
+        }
+        Log.debug("Формат записи: \(Int(hardware.mSampleRate)) Гц, "
+                  + "\(hardware.mChannelsPerFrame) кан. с железа")
+        return format
+    }
+
+    private func teardown() {
+        guard let unit else { return }
+        AudioOutputUnitStop(unit)
+        AudioUnitUninitialize(unit)
+        AudioComponentInstanceDispose(unit)
+        self.unit = nil
     }
 
     /// Пишем несжатым WAV в кладовку записей.
     ///
-    /// Раньше писали сразу в m4a — он в десять раз легче, и отправка
-    /// не упиралась в таймаут на слабой сети. Но у m4a оглавление
-    /// дописывается при закрытии файла: запись, оборванная перезапуском
-    /// посреди фразы, не открывалась потом ничем, и наговоренное пропадало.
-    /// У WAV данные идут сразу за заголовком — оборванный файл чинится
-    /// двумя числами, см. `RecordingVault.repairIfNeeded`.
-    ///
-    /// Выигрыш в весе никуда не делся: сжимаем перед самой отправкой.
+    /// У m4a оглавление дописывается при закрытии файла: запись, оборванная
+    /// перезапуском посреди фразы, не открывалась потом ничем. У WAV данные
+    /// идут сразу за заголовком — оборванный файл чинится двумя числами,
+    /// см. `RecordingVault.repairIfNeeded`. В весе не теряем: сжимаем
+    /// перед самой отправкой.
     private func makeFile() throws -> (URL, AVAudioFile) {
         let url = RecordingVault.newRecordingURL()
         let pcm: [String: Any] = [
@@ -376,49 +289,53 @@ final class AudioRecorder {
         return (url, try AVAudioFile(forWriting: url, settings: pcm))
     }
 
-    private func append(_ buffer: AVAudioPCMBuffer) {
-        guard let file else { return }
+    // MARK: - Приём кадров
 
-        // Преобразователь строится по формату первого пришедшего буфера:
-        // до этого момента настоящий формат устройства неизвестен, а на
-        // беспроводной гарнитуре он ещё и меняется при переключении режима.
-        if converter == nil {
-            guard let made = AVAudioConverter(from: buffer.format, to: file.processingFormat) else {
-                Log.write("Формат микрофона не поддерживается: \(buffer.format)")
-                return
-            }
-            converter = made
-            Log.debug("Формат записи: \(Int(buffer.format.sampleRate)) Гц, "
-                      + "\(buffer.format.channelCount) кан.")
-        }
-        guard let converter else { return }
+    private func render(flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+                        stamp: UnsafePointer<AudioTimeStamp>,
+                        bus: UInt32, frames: UInt32) {
+        guard let unit, let hardwareFormat, let file, let converter else { return }
+
+        var list = AudioBufferList(
+            mNumberBuffers: 1,
+            mBuffers: AudioBuffer(mNumberChannels: 1,
+                                  mDataByteSize: frames * 4,
+                                  mData: nil)
+        )
+        guard AudioUnitRender(unit, flags, stamp, bus, frames, &list) == noErr,
+              let raw = list.mBuffers.mData,
+              let source = AVAudioPCMBuffer(pcmFormat: hardwareFormat, frameCapacity: frames)
+        else { return }
+
+        source.frameLength = frames
+        memcpy(source.floatChannelData![0], raw, Int(frames) * 4)
 
         let outFormat = file.processingFormat
-        let ratio = outFormat.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
-        guard let outBuffer = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
+        let ratio = outFormat.sampleRate / hardwareFormat.sampleRate
+        let capacity = AVAudioFrameCount(Double(frames) * ratio) + 1024
+        guard let target = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else {
+            return
+        }
 
         var consumed = false
         var error: NSError?
-        converter.convert(to: outBuffer, error: &error) { _, status in
+        converter.convert(to: target, error: &error) { _, status in
             if consumed {
                 status.pointee = .noDataNow
                 return nil
             }
             consumed = true
             status.pointee = .haveData
-            return buffer
+            return source
         }
 
-        guard error == nil, outBuffer.frameLength > 0 else { return }
-        try? file.write(from: outBuffer)
+        guard error == nil, target.frameLength > 0 else { return }
+        try? file.write(from: target)
 
-        let level = Self.rms(of: outBuffer)
+        let level = Self.rms(of: target)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             // Первый дошедший кадр снимает сторожа мёртвого микрофона.
-            // Флаг ставится здесь, а не в звуковом потоке: иначе главный
-            // поток читал бы его наперегонки с записью.
             self.receivedAudio = true
             if let level {
                 self.peakLevel = max(self.peakLevel, level)

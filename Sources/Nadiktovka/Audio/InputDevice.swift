@@ -96,14 +96,16 @@ enum AudioDevices {
 
     /// Делает устройство системным микрофоном по умолчанию.
     ///
-    /// Так, а не подменой устройства внутри `AVAudioEngine`. Движок на macOS
-    /// держит вход и выход одним узлом и навязанное устройство переваривает
-    /// через раз: `start()` отвечал -10868, «формат не поддерживается», и
-    /// диктовка не начиналась вовсе. Системный выбор он же читает штатно.
+    /// Способ нелюбимый, но единственный работающий. Задать устройство
+    /// своему аудиоюниту (`kAudioOutputUnitProperty_CurrentDevice`) можно —
+    /// проверено, — но только пока вход и выход указывают на одно устройство:
+    /// `AVAudioEngine` на macOS держит их **одним** узлом. Стоит выводу быть
+    /// на наушниках, а входу на встроенном микрофоне, как `start()` отвечает
+    /// -10868, «формат не поддерживается», и запись не начинается вовсе.
+    /// Проверено 19 августа на живой машине с AirPods Pro в качестве вывода.
     ///
-    /// Побочное следствие честное и видимое: выбранный в приложении микрофон
-    /// становится микрофоном системы. Это ровно то, что человек и просит,
-    /// и это же видно в системных настройках звука.
+    /// Правильное лечение — собственный юнит AUHAL с выключенной выходной
+    /// стороной, там такого ограничения нет. Это отдельная работа.
     @discardableResult
     static func makeDefaultInput(_ id: AudioDeviceID) -> Bool {
         var addr = address(kAudioHardwarePropertyDefaultInputDevice)
@@ -220,7 +222,31 @@ enum AudioDevices {
         case .device: mode = selectedIsMissing() ? "выбранное отключено" : "выбран вручную"
         }
         let out = defaultOutput().map { "; вывод — \(describe($0).name)" } ?? ""
-        return "\(chosen) [\(mode)]\(out)"
+        return "\(chosen) [\(mode)]\(gainNote())\(out)"
+    }
+
+    /// Громкость выбранного микрофона — в журнал, рядом с его именем.
+    ///
+    /// Приложение её не меняет: мы пишем только в выход. Но менять её могут
+    /// другие — Zoom и Teams делают это сами, «подстраивая уровень», — а тихий
+    /// вход выглядит потом как плохая расшифровка или как молчащий микрофон.
+    /// Поэтому записываем: без этой строки причину не отличить от своей вины.
+    private static func gainNote() -> String {
+        guard let id = defaultInput() else { return "" }
+        for element: UInt32 in [kAudioObjectPropertyElementMain, 1] {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeScalar,
+                mScope: kAudioObjectPropertyScopeInput,
+                mElement: element
+            )
+            guard AudioObjectHasProperty(id, &address) else { continue }
+            var value = Float(0)
+            var size = UInt32(MemoryLayout<Float>.size)
+            guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr
+            else { continue }
+            return ", громкость входа \(Int(value * 100))%"
+        }
+        return ""
     }
 
     // MARK: - CoreAudio

@@ -208,8 +208,8 @@ protocol StatusPanelActions: AnyObject {
     func menuSetActivation(_ mode: HotkeyActivation)
     /// Отправить заново фразу, которая не доехала.
     func menuRetryPending(_ id: Int)
-    /// Убрать из списка фразу, которая так и не доехала, вместе с записью.
-    func menuForgetPending(_ id: Int)
+    /// Остановить фразу: и ту, что ещё расшифровывается, и провалившуюся.
+    func menuCancelPending(_ id: Int)
     func menuQuit()
 }
 
@@ -422,8 +422,8 @@ private struct StatusPanelView: View {
                 ForEach(model.pending) { item in
                     PendingRow(item: item) {
                         model.actions?.menuRetryPending(item.id)
-                    } forget: {
-                        model.actions?.menuForgetPending(item.id)
+                    } cancel: {
+                        model.actions?.menuCancelPending(item.id)
                     }
                 }
 
@@ -460,9 +460,14 @@ private struct StatusPanelView: View {
     private struct PendingRow: View {
         let item: TranscriptionQueue.Progress
         let retry: () -> Void
-        let forget: () -> Void
+        let cancel: () -> Void
 
         @State private var hovered = false
+
+        private var isFailed: Bool {
+            if case .failed = item.stage { return true }
+            return false
+        }
 
         var body: some View {
             HStack(spacing: 8) {
@@ -485,14 +490,15 @@ private struct StatusPanelView: View {
                     .help("Отправить заново")
                 }
 
-                if case .failed = item.stage {
-                    Button(action: forget) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Убрать из списка")
+                // Крестик есть всегда, а не только у провалившихся: ждать
+                // расшифровку, которая уже не нужна, человек не обязан.
+                Button(action: cancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(hovered ? .primary : .tertiary)
                 }
+                .buttonStyle(.plain)
+                .help(isFailed ? "Убрать из списка" : "Остановить расшифровку")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)

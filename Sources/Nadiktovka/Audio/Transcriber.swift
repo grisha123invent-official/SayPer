@@ -119,6 +119,10 @@ enum Transcriber {
         let text = (String(data: data, encoding: .utf8) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw TranscribeError.empty }
+        guard !isHallucination(text) else {
+            Log.write("Whisper вернул подделку («\(text.prefix(40))») — не вставляю")
+            throw TranscribeError.empty
+        }
 
         guard Settings.shared.cleanup else { return text }
         return (try? await cleanup(text: text, apiKey: apiKey)) ?? text
@@ -220,6 +224,32 @@ enum Transcriber {
             return false
         }
     }
+
+    /// Whisper на пустой записи не молчит, а выдаёт обрывки, которые видел
+    /// в обучении: титры телепередач, «спасибо за просмотр», призывы
+    /// подписаться. В поле это прилетало вместо надиктованного.
+    ///
+    /// Сверяем целиком, а не по вхождению: те же слова человек может сказать
+    /// и сам, и тогда это его текст, а не подделка.
+    private static func isHallucination(_ text: String) -> Bool {
+        let cleaned = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+            .lowercased()
+        return knownFakes.contains { cleaned == $0 }
+    }
+
+    private static let knownFakes: Set<String> = [
+        "редактор субтитров а.синецкая корректор а.егорова",
+        "редактор субтитров а.семкин корректор а.егорова",
+        "субтитры сделал dimatorzok",
+        "субтитры и перевод сделал dimatorzok",
+        "продолжение следует...",
+        "спасибо за просмотр!",
+        "спасибо за просмотр.",
+        "подписывайтесь на канал!",
+        "продолжение следует…"
+    ]
 
     private static func check(response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }

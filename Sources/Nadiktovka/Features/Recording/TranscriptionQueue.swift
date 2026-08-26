@@ -161,8 +161,18 @@ final class TranscriptionQueue {
                 || Task.isCancelled
 
             if cancelled {
-                Log.write("Расшифровка отменена")
-                RecordingVault.discard(job.audio)
+                // Запись НЕ стираем. Отмена прилетает не только от человека:
+                // так же выглядит закрытие приложения и снятие процесса,
+                // а там сказанное ещё никуда не доставлено. Замерено
+                // 23 августа: пропал интернет, расшифровка повисла,
+                // приложение перезапустили — и запись на 14 секунд исчезла,
+                // потому что отмена считала её ненужной.
+                //
+                // Стирает запись только осознанное нажатие крестика,
+                // см. `cancel(_:)`. Всё остальное её сохраняет: при следующем
+                // запуске приложение подберёт её само.
+                Log.write("Расшифровка отменена, запись сохранена — "
+                          + "подберу при следующем запуске")
                 progress[job.id] = nil
                 publishProgress()
             } else {
@@ -203,17 +213,40 @@ final class TranscriptionQueue {
         publishProgress()
     }
 
-    /// Убрать провалившуюся фразу из панели вместе с её записью.
+    /// Остановить фразу и убрать её из панели вместе с записью.
+    ///
+    /// Работает в любом состоянии: и когда расшифровка ещё идёт, и когда она
+    /// уже провалилась. Нажатие осознанное, поэтому запись стирается — иначе
+    /// остановленная фраза вернулась бы при следующем запуске как забытая.
     ///
     /// Без `@MainActor`: зовётся из панели, которая и так живёт на главной
     /// очереди, а пометка потянула бы за собой весь `AppDelegate`.
-    func forget(_ id: Int) {
+    func cancel(_ id: Int) {
+        if let task = tasks[id] {
+            task.cancel()
+            tasks[id] = nil
+        }
+        ready[id] = nil
+        // Провалившаяся фраза свой номер уже пропустила, а работающая —
+        // ещё нет: без этого хвост очереди ждал бы её вечно.
+        if id == nextToDeliver { nextToDeliver += 1 }
+
         if let entry = progress[id] {
             RecordingVault.discard(entry.audio)
-            Log.write("Недоставленная фраза убрана вручную вместе с записью")
+            Log.write("Фраза остановлена вручную, запись удалена")
         }
         progress[id] = nil
         publishProgress()
+        deliverReadyFromMain()
+        finishIfDrainedFromMain()
+    }
+
+    private func deliverReadyFromMain() {
+        Task { @MainActor in self.deliverReady() }
+    }
+
+    private func finishIfDrainedFromMain() {
+        Task { @MainActor in self.finishIfDrained() }
     }
 
     /// Отправить провалившуюся фразу заново.

@@ -37,6 +37,7 @@ enum TextInserter {
 
     private static func sendCommandV() {
         guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
+        source.userData = SyntheticMark.value
         // Чтобы наш ⌘V не смешался с физически зажатым модификатором-хоткеем.
         source.setLocalEventsFilterDuringSuppressionState(
             [.permitLocalMouseEvents, .permitSystemDefinedEvents],
@@ -58,6 +59,7 @@ enum TextInserter {
     /// Посимвольный ввод: буфер обмена не трогается, но длинный текст «печатается» заметно.
     private static func typeUnicode(_ text: String) {
         guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
+        source.userData = SyntheticMark.value
 
         // Порциями по 20 символов — CGEvent не любит длинные строки за раз.
         for chunk in Array(text).chunked(into: 20) {
@@ -109,4 +111,17 @@ private extension Array {
             Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
+}
+
+/// Метка на событиях, которые приложение шлёт само.
+///
+/// Вставка текста делается синтетическим ⌘V. Перехватчик горячей клавиши
+/// видит эти события наравне с человеческими, а флагов зажатого человеком
+/// модификатора в них нет — и он решал, что клавишу отпустили: пилюля гасла
+/// посреди фразы, запись выбрасывалась как случайное касание.
+///
+/// Метка едет в поле источника события и отличает своё от чужого надёжно,
+/// без догадок по состоянию клавиатуры.
+enum SyntheticMark {
+    static let value: Int64 = 0x5359_5045_5200
 }
