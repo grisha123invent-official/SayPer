@@ -37,6 +37,9 @@ final class TranscriptionQueue {
     struct Progress: Identifiable, Equatable {
         enum Stage: Equatable {
             case sending
+            /// Текст готов, но впереди стоит фраза, которая ещё едет.
+            /// Вставляем строго по порядку, поэтому этот ждёт своей очереди.
+            case ready
             /// Связь подвела, идёт повтор. Номер попытки — человеку важно
             /// видеть, что приложение не сдалось, а работает.
             case retrying(attempt: Int)
@@ -149,8 +152,10 @@ final class TranscriptionQueue {
             }
             guard !Task.isCancelled else { return }
             RecordingVault.discard(job.audio)
-            progress[job.id] = nil
-            publishProgress()
+            // Строку не убираем: текст готов, но может ждать впереди стоящую
+            // фразу. Без этой отметки человек видел пустоту и не понимал,
+            // почему ничего не появляется, — а всё стояло за одним затором.
+            note(job.id, .ready)
             ready[job.id] = (text, job)
             deliverReady()
         } catch {
@@ -195,9 +200,11 @@ final class TranscriptionQueue {
     @MainActor
     private func deliverReady() {
         while let entry = ready.removeValue(forKey: nextToDeliver) {
+            progress[entry.job.id] = nil
             nextToDeliver += 1
             onReady?(entry.text, entry.job)
         }
+        publishProgress()
     }
 
     /// Отметить новое состояние фразы и показать его.

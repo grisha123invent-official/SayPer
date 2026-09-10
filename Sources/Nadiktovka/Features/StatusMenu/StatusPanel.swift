@@ -514,6 +514,11 @@ private struct StatusPanelView: View {
             switch item.stage {
             case .sending:
                 ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12)
+            case .ready:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
             case .retrying:
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10))
@@ -531,6 +536,8 @@ private struct StatusPanelView: View {
             switch item.stage {
             case .sending:
                 return item.isRecovered ? "подобрана после перезапуска" : "расшифровываю"
+            case .ready:
+                return "готово, ждёт предыдущую фразу"
             case .retrying(let attempt):
                 return "связь подвела, повторяю (\(attempt) из 3)"
             case .failed(let message):
