@@ -54,6 +54,11 @@ final class AudioRecorder {
     /// Самый громкий кадр за запись, 0…1. По нему видно, был ли вообще звук.
     private(set) var peakLevel: Float = 0
 
+    /// Сколько уже пишем. Нужно, чтобы отличить задетую клавишу от шортката.
+    var currentDuration: TimeInterval {
+        startedAt.map { Date().timeIntervalSince($0) } ?? 0
+    }
+
     private var unit: AudioUnit?
     private var file: AVAudioFile?
     private var converter: AVAudioConverter?

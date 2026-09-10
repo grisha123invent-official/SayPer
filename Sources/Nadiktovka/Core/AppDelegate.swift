@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch command {
             case .begin: self.beginRecording()
             case .finish: self.finishRecording()
-            case .abort: self.abortRecording()
+            case .abort: self.abortRecording(reason: .shortcut)
             }
         }
 
@@ -553,8 +553,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fail(error.localizedDescription)
     }
 
-    private func abortRecording() {
+    /// Почему запись прерывают.
+    private enum AbortReason {
+        /// Esc — человек сам отказался от сказанного.
+        case escape
+        /// Во время записи нажали обычную клавишу. Для сочетаний из одних
+        /// модификаторов это значит «был шорткат, а не диктовка».
+        case shortcut
+    }
+
+    private func abortRecording(reason: AbortReason = .escape) {
         guard recorder.isRecording else { return }
+
+        // Задели клавишу посреди фразы — сказанное не выбрасываем.
+        //
+        // Шорткат человек нажимает сразу: зажал ⌃, ткнул C, отпустил.
+        // Если же он к этому моменту говорит уже больше секунды, то он
+        // диктовал и просто смазал пробел — выбрасывать надиктованное
+        // из-за этого нельзя. Раньше выбрасывалось молча, вместе с фразой.
+        if reason == .shortcut, recorder.currentDuration >= 1.0 {
+            Log.write("Задета клавиша посреди диктовки ("
+                      + String(format: "%.1f", recorder.currentDuration)
+                      + " с) — сохраняю сказанное")
+            finishRecording()
+            return
+        }
+
         OutputDucker.restore()
         recorder.cancel()
         gate.recordingDidStop()
