@@ -83,6 +83,17 @@ final class RecordingIndicator {
 
     /// Секунды ожидания ответа — чтобы длинная расшифровка не выглядела зависшей.
     func update(elapsed: TimeInterval) {
+        // Публикуем только когда меняется сама надпись.
+        //
+        // Время ожидания приходит дважды в секунду, а подпись на пилюле
+        // от него зависит ступеньками — «сейчас», «почти», «ещё чуть-чуть».
+        // Раньше публиковалось каждое значение: SwiftUI перекладывал вид
+        // и заново анимировал размер окна по два раза в секунду, всё время
+        // ожидания. На долгой расшифровке приложение уходило в бесконечную
+        // перекладку и переставало отвечать — снято слепком 28 августа,
+        // главный поток стоял в разметке SwiftUI, процессор на 19%.
+        guard IndicatorModel.waitingPhrase(elapsed)
+                != IndicatorModel.waitingPhrase(model.elapsed) else { return }
         model.elapsed = elapsed
         reflow()
     }
@@ -292,7 +303,7 @@ private final class IndicatorModel: ObservableObject {
     /// успокаивает, а не подгоняет — на счётчик человек начинает смотреть.
     /// Хвост лестницы намеренно перестаёт шутить: если ждём больше минуты,
     /// уместнее сказать, что делать, чем бодриться.
-    private static func waitingPhrase(_ elapsed: TimeInterval) -> String {
+    static func waitingPhrase(_ elapsed: TimeInterval) -> String {
         switch elapsed {
         case ..<4: return "Расшифровываю"
         case ..<9: return "Уже скоро"
