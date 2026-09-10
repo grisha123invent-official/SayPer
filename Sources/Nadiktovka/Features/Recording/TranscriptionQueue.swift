@@ -86,6 +86,16 @@ final class TranscriptionQueue {
 
     var isEmpty: Bool { tasks.isEmpty }
 
+    /// Задачи, о которых пилюле знать не нужно.
+    private var quietJobs: Set<Int> = []
+
+    private func isQuiet(_ id: Int) -> Bool { quietJobs.contains(id) }
+
+    /// Сколько сейчас работает задач, ради которых пилюля показывается.
+    private var loudJobsRunning: Int {
+        tasks.keys.filter { !quietJobs.contains($0) }.count
+    }
+
     /// Сколько секунд ждёт самая старая фраза в очереди — для подписи на пилюле.
     var oldestWait: TimeInterval {
         guard let started = oldestStart else { return 0 }
@@ -94,8 +104,12 @@ final class TranscriptionQueue {
 
     private var oldestStart: Date?
 
+    /// `quietly` — работа, которую человек не начинал голосом прямо сейчас:
+    /// повтор из панели и записи, подобранные после перезапуска. Пилюля для
+    /// них не показывается: она сообщает «слушаю тебя», а тут никто не говорит,
+    /// и всплывшая посреди работы плашка только мешает.
     func enqueue(audio: URL, duration: TimeInterval, insertMode: InsertMode,
-                 isRecovered: Bool = false) {
+                 isRecovered: Bool = false, quietly: Bool = false) {
         let job = Job(
             id: nextID, audio: audio, duration: duration,
             startedAt: Date(), insertMode: insertMode, isRecovered: isRecovered
@@ -107,7 +121,11 @@ final class TranscriptionQueue {
                                     audio: audio, insertMode: insertMode, stage: .sending)
         publishProgress()
 
-        if tasks.isEmpty {
+        if quietly || isRecovered {
+            quietJobs.insert(job.id)
+        }
+
+        if !isQuiet(job.id), loudJobsRunning == 0 {
             oldestStart = job.startedAt
             onActivityChange?(true)
         }
@@ -122,6 +140,7 @@ final class TranscriptionQueue {
         guard !tasks.isEmpty else { return }
         for task in tasks.values { task.cancel() }
         tasks.removeAll()
+        quietJobs.removeAll()
         ready.removeAll()
         progress.removeAll()
         publishProgress()
@@ -268,7 +287,8 @@ final class TranscriptionQueue {
         Log.write("Повторная отправка фразы длиной "
                   + String(format: "%.1f", entry.duration) + " с")
         enqueue(audio: entry.audio, duration: entry.duration,
-                insertMode: entry.insertMode, isRecovered: entry.isRecovered)
+                insertMode: entry.insertMode, isRecovered: entry.isRecovered,
+                quietly: true)
     }
 
     private func publishProgress() {
@@ -277,8 +297,11 @@ final class TranscriptionQueue {
 
     @MainActor
     private func finishIfDrained() {
-        guard tasks.isEmpty else { return }
+        // Пилюлю снимаем, когда закончились именно «громкие» задачи: фоновый
+        // повтор может ехать сколько угодно, человеку это не мешает.
+        guard loudJobsRunning == 0 else { return }
         oldestStart = nil
         onActivityChange?(false)
+        if tasks.isEmpty { quietJobs.removeAll() }
     }
 }
