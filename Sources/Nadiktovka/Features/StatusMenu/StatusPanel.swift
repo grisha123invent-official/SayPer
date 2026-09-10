@@ -429,9 +429,6 @@ private struct StatusPanelView: View {
 
                 ForEach(model.history) { record in
                     RecentRow(record: record) {
-                        model.actions?.menuInsertAgain(record.text)
-                        dismiss()
-                    } copy: {
                         model.actions?.menuCopy(record.text)
                         dismiss()
                     }
@@ -553,7 +550,6 @@ private struct StatusPanelView: View {
 
     private struct RecentRow: View {
         let record: TranscriptionRecord
-        let insert: () -> Void
         let copy: () -> Void
 
         @State private var hovered = false
@@ -564,18 +560,11 @@ private struct StatusPanelView: View {
                     .font(.system(size: 12))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Spacer(minLength: 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                // Копирование видно всегда, а не по наведению. Это спасательный
-                // выход: если вставка не долетела до нужного окна, текст
-                // достают отсюда, и искать способ в этот момент незачем.
-                Button(action: copy) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 11))
-                        .foregroundStyle(hovered ? .primary : .tertiary)
-                }
-                .buttonStyle(.plain)
-                .help("Скопировать")
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundStyle(hovered ? .primary : .tertiary)
 
                 Text(Self.time.string(from: record.date))
                     .font(.system(size: 10).monospacedDigit())
@@ -587,10 +576,17 @@ private struct StatusPanelView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(hovered ? Palette.surfaceRowHover : .clear)
             )
+            // Вся строка копирует.
+            //
+            // Раньше нажатие вставляло текст заново, а значок рядом копировал.
+            // Это было неверно по сути: панель открыта — значит окно, в котором
+            // человек печатал, уже не в фокусе, и «вставить снова» отправляет
+            // текст неизвестно куда. За текстом в меню приходят, чтобы забрать
+            // его в буфер, а вставит человек сам и там, где ему нужно.
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .onHover { hovered = $0 }
-            .onTapGesture(perform: insert)
-            .help("Вставить снова")
+            .onTapGesture(perform: copy)
+            .help("Скопировать")
         }
 
         private static let time: DateFormatter = {
