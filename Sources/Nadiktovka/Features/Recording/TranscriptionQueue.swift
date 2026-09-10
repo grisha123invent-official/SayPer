@@ -199,6 +199,14 @@ final class TranscriptionQueue {
                           + "подберу при следующем запуске")
                 progress[job.id] = nil
                 publishProgress()
+            } else if isHopeless(error) {
+                // Речи в записи нет — повтор вернёт ту же пустоту. Держать
+                // такой файл значит расшифровывать его заново при каждом
+                // запуске и каждый раз платить за это.
+                Log.write("В записи нет речи — удаляю, повторять нечего")
+                RecordingVault.discard(job.audio)
+                progress[job.id] = nil
+                publishProgress()
             } else {
                 // Файл не трогаем: связь могла отвалиться, а запись —
                 // единственное, что осталось от сказанного. Подберём
@@ -212,6 +220,20 @@ final class TranscriptionQueue {
                 nextToDeliver += 1
                 deliverReady()
             }
+        }
+    }
+
+    /// Отказ, который повтором не лечится: в записи просто нет речи.
+    ///
+    /// Отличать важно. Обрыв связи — повод сохранить запись и попробовать
+    /// снова, а пустая запись — повод её удалить: иначе она подбирается
+    /// при каждом запуске, снова уходит в OpenAI и снова возвращается
+    /// пустотой, и так до бесконечности за твои деньги.
+    private func isHopeless(_ error: Error) -> Bool {
+        guard let error = error as? Transcriber.TranscribeError else { return false }
+        switch error {
+        case .empty, .tooShort: return true
+        case .noAPIKey, .http: return false
         }
     }
 
