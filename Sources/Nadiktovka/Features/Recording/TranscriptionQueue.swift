@@ -79,6 +79,11 @@ final class TranscriptionQueue {
     private var tasks: [Int: Task<Void, Never>] = [:]
     /// Ответы, пришедшие раньше своей очереди, вместе со своими фразами.
     private var ready: [Int: (text: String, job: Job)] = [:]
+    /// Номера, которых в очереди уже не будет: фраза провалилась, её
+    /// остановили вручную или отложили до следующего запуска. Список нужен
+    /// затем, что пропускать номер в момент провала нельзя — к этой минуте
+    /// он не обязательно первый в очереди, см. `deliverReady()`.
+    private var skipped: Set<Int> = []
     /// Состояние каждой фразы в работе. Провалившиеся остаются здесь,
     /// пока человек не уберёт их сам: молча исчезнувшая фраза читается
     /// как потерянная.
@@ -147,6 +152,7 @@ final class TranscriptionQueue {
         // Хвост очереди отменён — следующая фраза начнёт нумерацию заново,
         // иначе она встала бы в ожидание отменённых предшественниц навсегда.
         nextToDeliver = nextID
+        skipped.removeAll()
         oldestStart = nil
         onActivityChange?(false)
     }
@@ -214,12 +220,17 @@ final class TranscriptionQueue {
                 note(job.id, .failed(error.localizedDescription))
                 onFailure?(error.localizedDescription)
             }
-            // Провалившаяся фраза не должна держать следующие: пропускаем её
-            // номер, иначе весь хвост очереди застрянет навсегда.
-            if job.id == nextToDeliver {
-                nextToDeliver += 1
-                deliverReady()
-            }
+            // Фраза до поля не доедет — её номер в очереди пропускаем.
+            //
+            // Раньше здесь стояла проверка «а она ли сейчас первая», и этого
+            // было мало: провал случается и раньше ответа на предыдущую фразу
+            // (короткая запись падает быстрее, чем длинная расшифровывается).
+            // Тогда номер оставался дыркой, доставка упиралась в него
+            // навсегда — а весь хвост к этому времени уже расшифрован,
+            // и записи удалены. Замерено 27 октября: четыре готовые фразы
+            // не дошли ни одна, человек диктовал в пустоту.
+            skipped.insert(job.id)
+            deliverReady()
         }
     }
 
@@ -240,10 +251,18 @@ final class TranscriptionQueue {
     /// Отдаёт всё, что готово и стоит следующим по очереди.
     @MainActor
     private func deliverReady() {
-        while let entry = ready.removeValue(forKey: nextToDeliver) {
-            progress[entry.job.id] = nil
-            nextToDeliver += 1
-            onReady?(entry.text, entry.job)
+        while true {
+            if let entry = ready.removeValue(forKey: nextToDeliver) {
+                progress[entry.job.id] = nil
+                nextToDeliver += 1
+                onReady?(entry.text, entry.job)
+            } else if skipped.remove(nextToDeliver) != nil {
+                nextToDeliver += 1
+            } else {
+                // Следующая по счёту фраза ещё едет — дальше не идём:
+                // порядок вставки важнее скорости.
+                break
+            }
         }
         publishProgress()
     }
@@ -275,9 +294,7 @@ final class TranscriptionQueue {
             tasks[id] = nil
         }
         ready[id] = nil
-        // Провалившаяся фраза свой номер уже пропустила, а работающая —
-        // ещё нет: без этого хвост очереди ждал бы её вечно.
-        if id == nextToDeliver { nextToDeliver += 1 }
+        skipped.insert(id)
 
         if let entry = progress[id] {
             RecordingVault.discard(entry.audio)
