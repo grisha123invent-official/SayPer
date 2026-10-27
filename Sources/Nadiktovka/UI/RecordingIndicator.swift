@@ -383,9 +383,11 @@ private enum IndicatorMetrics {
 /// размывает и подкрашивается им изнутри — тонировать стекло отдельно не надо.
 private struct IndicatorHalo: View {
     @ObservedObject var model: IndicatorModel
+    /// Пилюля после диктовки только прячется, окно остаётся жить.
+    @State private var windowVisible = true
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: model.isStatic)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: model.isStatic || !windowVisible)) { timeline in
             let t = model.isStatic ? 0 : timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 Capsule()
@@ -405,6 +407,7 @@ private struct IndicatorHalo: View {
             }
         }
         .allowsHitTesting(false)
+        .trackingWindowVisibility($windowVisible)
     }
 
     /// Во время записи ореол дышит по громкости — свет отзывается на голос,
@@ -511,9 +514,10 @@ private struct Equalizer: View {
     let level: Float
     let state: RecordingIndicator.State
     let tint: Color
+    @State private var windowVisible = true
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: isPaused)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: isPaused || !windowVisible)) { timeline in
             Canvas { context, size in
                 let phase = timeline.date.timeIntervalSinceReferenceDate * 6
                 let barWidth = IndicatorMetrics.barWidth
@@ -534,6 +538,7 @@ private struct Equalizer: View {
                 }
             }
         }
+        .trackingWindowVisibility($windowVisible)
     }
 
     private var isPaused: Bool {

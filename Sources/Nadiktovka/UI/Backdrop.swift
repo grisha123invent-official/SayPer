@@ -5,16 +5,18 @@ import SwiftUI
 ///
 /// Всё медленно живёт: радиус дышит за ~9 секунд (ритм спокойной речи),
 /// сам орб едва заметно блуждает за ~33 секунды. При включённом
-/// «уменьшении движения» анимация останавливается на нулевой фазе.
+/// «уменьшении движения» анимация останавливается на нулевой фазе,
+/// а пока окно не видно — стоит там, где её застало закрытие.
 struct AmbientGlow: View {
     @Environment(\.colorScheme) private var scheme
+    @State private var windowVisible = true
 
     private var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion || !windowVisible)) { timeline in
             Canvas { context, size in
                 let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
                 draw(into: context, size: size, time: time)
@@ -22,6 +24,7 @@ struct AmbientGlow: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
+        .trackingWindowVisibility($windowVisible)
     }
 
     private func draw(into context: GraphicsContext, size: CGSize, time: TimeInterval) {
@@ -129,13 +132,14 @@ struct AmbientGlow: View {
 /// стеклу — у шапки и у кнопок, — оставляя середину спокойной.
 struct PanelGlow: View {
     @Environment(\.colorScheme) private var scheme
+    @State private var windowVisible = true
 
     private var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion || !windowVisible)) { timeline in
             Canvas { context, size in
                 let t = reduceMotion ? 47 : timeline.date.timeIntervalSinceReferenceDate
                 draw(&context, size: size, t: t)
@@ -143,6 +147,7 @@ struct PanelGlow: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
+        .trackingWindowVisibility($windowVisible)
     }
 
     private func draw(_ context: inout GraphicsContext, size: CGSize, t: Double) {
