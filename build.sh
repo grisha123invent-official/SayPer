@@ -15,6 +15,23 @@ BIN="build/${EXECUTABLE}"
 
 TARGET="$(uname -m)-apple-macos26.0"
 
+# Command Line Tools 27 без Xcode не собирают SwiftUI: в SDK 27 `@State`
+# стал макросом, а его плагин SwiftUIMacros ставится только вместе с Xcode.
+# Компилятор падает на первом же `@State` с «plugin for module
+# 'SwiftUIMacros' not found». Тот же набор инструментов везёт и SDK 26,
+# где `@State` ещё обычная обёртка, — им и собираем. Целевая система
+# всё равно macOS 26, так что ничего не теряем.
+CLT="/Library/Developer/CommandLineTools"
+if [ -z "${SDKROOT:-}" ] && [ "$(xcode-select -p)" = "$CLT" ] \
+    && [ "$(xcrun --show-sdk-version | cut -d. -f1)" -ge 27 ]; then
+    if [ ! -d "${CLT}/SDKs/MacOSX26.sdk" ]; then
+        echo "Command Line Tools 27 без SDK 26 не соберут @State — поставь Xcode" >&2
+        exit 1
+    fi
+    export SDKROOT="${CLT}/SDKs/MacOSX26.sdk"
+    echo "==> SDK 26 из Command Line Tools (в SDK 27 нет плагина SwiftUIMacros)"
+fi
+
 echo "==> Компиляция"
 mkdir -p build
 
